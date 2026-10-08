@@ -229,7 +229,7 @@ describe('처리할 일 코멘트', () => {
     board.threadPost('owner', id, '후보를 몇 개 보여 주세요');
     await engine.runUntilIdle();
 
-    const thread = board.thread(id);
+    const thread = board.openThread(id);
     assert.deepEqual(thread.map((e) => [e.from, e.text]), [
       ['owner', '후보를 몇 개 보여 주세요'],
       ['ceo', 'ceo 확인: 후보를 몇 개 보여 주세요'],
@@ -242,10 +242,10 @@ describe('처리할 일 코멘트', () => {
 
     // 새 코멘트가 없으면 다시 답하지 않는다
     await engine.runUntilIdle();
-    assert.equal(board.thread(id).length, 2);
+    assert.equal(board.openThread(id).length, 2);
     board.threadPost('owner', id, '.com 으로 갑시다');
     await engine.runUntilIdle();
-    assert.equal(board.thread(id).length, 4);
+    assert.equal(board.openThread(id).length, 4);
   });
 
   it('답변 확정 때 코멘트 전체가 답변으로 넘어가고 스레드는 비워진다', () => {
@@ -255,7 +255,7 @@ describe('처리할 일 코멘트', () => {
     board.threadPost('ceo', id, 'a.com, b.com 이 있습니다');
     board.answer('owner', id, '');
     assert.equal(board.read(id).task.status, 'pending');
-    assert.deepEqual(board.thread(id), []);
+    assert.deepEqual(board.openThread(id), []);
     assert.match(board.readLog(id), /답변: 코멘트로 나눈 내용:[\s\S]*\*\*사용자\*\*: 후보를 보여 주세요[\s\S]*\*\*ceo\*\*: a\.com, b\.com/);
     assert.throws(() => board.threadPost('owner', id, '늦은 코멘트'), /처리할 일이 아닙니다/);
   });
@@ -265,10 +265,10 @@ describe('처리할 일 코멘트', () => {
     const id = asked(board, ['가입', '결제']);
     board.threadPost('owner', id, '가입은 어디서요?', 1);
     await engine.runUntilIdle();
-    assert.equal(board.thread(id, 1).length, 2);
-    assert.equal(board.thread(id, 2).length, 0);
+    assert.equal(board.openThread(id, 1).length, 2);
+    assert.equal(board.openThread(id, 2).length, 0);
     board.answer('owner', id, '가입했습니다', 1);
-    assert.equal(board.thread(id).length, 0);
+    assert.equal(board.openThread(id).length, 0);
     assert.throws(() => board.threadPost('owner', id, 'x', 1), /처리할 일이 아닙니다/);
     board.threadPost('owner', id, '결제는 다음 주에', 2);
     assert.equal(board.read(id).task.status, 'blocked');
@@ -281,7 +281,7 @@ describe('처리할 일 코멘트', () => {
     board.requestApproval('ceo', a.id, '도메인 구매', []);
     board.threadPost('owner', a.id, '얼마예요?');
     board.approve('owner', a.id, '', () => {});
-    assert.deepEqual(board.thread(a.id), []);
+    assert.deepEqual(board.openThread(a.id), []);
 
     const t = goal(board, '진행 중 목표');
     assert.throws(() => board.threadPost('owner', t.id, '어때요?'), /처리할 일이 아닙니다/);
@@ -317,13 +317,13 @@ describe('사용자 업무', () => {
     board.finishRun(g.id, '위임');
     board.threadPost('owner', signup.id, '앱 유형은 게임이 맞나요?');
     await engine.runUntilIdle();
-    assert.deepEqual(board.thread(signup.id).map((e) => e.from), ['owner', 'ceo']);
+    assert.deepEqual(board.openThread(signup.id).map((e) => e.from), ['owner', 'ceo']);
     assert.throws(() => board.done('ceo', signup.id, '대신 끝냄'), /담당자는 owner/);
 
     board.done('owner', signup.id, 'appName blindcandle');
     assert.equal(board.read(signup.id).task.status, 'done');
     assert.match(board.readLog(signup.id), /완료보고: 코멘트로 나눈 내용:[\s\S]*게임이 맞나요[\s\S]*\*\*사용자 \(최종\)\*\*: appName blindcandle/);
-    assert.deepEqual(board.thread(signup.id), []);
+    assert.deepEqual(board.openThread(signup.id), []);
     board.cancel('owner', ask.id, '토스 문의는 하지 않기로');
     assert.equal(board.read(dev.id).task.status, 'done');
     assert.equal(board.read(g.id).task.status, 'pending');
@@ -335,5 +335,50 @@ describe('사용자 업무', () => {
       () => board.createTask('owner', { title: 'x', assignee: 'owner', doneWhen: ['x'], parent: null }),
       /하위 업무로만/,
     );
+  });
+});
+
+describe('완료 해제', () => {
+  it('끝낸 사용자 업무를 다시 열면 코멘트가 이어지고, 이전 코멘트와 이력은 남는다', async () => {
+    const { engine, board } = setup({});
+    const g = goal(board, '운영');
+    board.start(g.id);
+    const t = board.createTask('ceo', { title: '콘솔 가입', assignee: 'owner', doneWhen: ['appName'], parent: g.id });
+    const other = board.createTask('ceo', { title: '키 발급', assignee: 'owner', doneWhen: ['넣었음'], parent: g.id });
+    board.finishRun(g.id, '위임');
+    board.threadPost('owner', t.id, '게임인가요?');
+    board.threadPost('ceo', t.id, '비게임입니다');
+    board.done('owner', t.id, '가입했어');
+
+    // 기록은 지우지 않고 닫아 둔다
+    assert.deepEqual(board.openThread(t.id), []);
+    assert.deepEqual(board.thread(t.id).map((e) => [e.from, e.event ?? null, !!e.closed]), [
+      ['owner', null, true], ['ceo', null, true], ['owner', 'closed', false],
+    ]);
+    assert.throws(() => board.threadPost('owner', t.id, '정정'), /처리할 일이 아닙니다/);
+    assert.throws(() => board.reopen('ceo', t.id), /사용자만/);
+    assert.throws(() => board.reopen('owner', g.id), /사용자 업무가 아니라서/);
+
+    board.reopen('owner', t.id);
+    assert.equal(board.read(t.id).task.status, 'pending');
+    assert.match(board.readLog(g.id), /정정: 사용자가 .* 의 완료를 해제/);
+    board.threadPost('owner', t.id, 'appName 은 blindcandle 이야');
+    await engine.runUntilIdle();
+    assert.deepEqual(board.openThread(t.id).map((e) => e.from), ['owner', 'ceo']);
+
+    board.done('owner', t.id, '');
+    assert.match(board.readLog(t.id), /완료보고: 코멘트로 나눈 내용:[\s\S]*appName 은 blindcandle/);
+    board.done('owner', other.id, '넣었음');
+    assert.equal(board.read(g.id).task.status, 'pending');
+  });
+
+  it('상위 업무가 이미 끝났으면 다시 열 수 없다', () => {
+    const { board } = setup({});
+    const g = goal(board);
+    board.start(g.id);
+    const t = board.createTask('ceo', { title: '가입', assignee: 'owner', doneWhen: ['x'], parent: g.id });
+    board.done('owner', t.id, '했음');
+    board.cancel('owner', g.id);
+    assert.throws(() => board.reopen('owner', t.id), /상위 업무 .* 이미 취소/);
   });
 });

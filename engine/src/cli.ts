@@ -51,6 +51,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf task pass <id> [--note "<메모>"]
   bf task reject <id> "<사유>"
   bf task comment <id> "<내용>" [--item <번호>]
+  bf task reopen <id> ["<사유>"]          끝낸 사용자 업무를 다시 열기 (사용자)
   bf task cancel <id> [--reason "<사유>"]
 
 결재·채용·기억 (직원용)
@@ -474,6 +475,13 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
       return 0;
     }
 
+    case 'reopen': {
+      const [id, ...text] = args;
+      const task = board.reopen(actor, requireId([id]), text.join(' '));
+      io.out(`${task.id} 완료를 해제했습니다 → ${STATUS_LABEL[task.status]}. 코멘트를 이어서 달 수 있습니다.`);
+      return 0;
+    }
+
     case 'cancel': {
       const { values, positionals } = parseArgs({
         args,
@@ -503,7 +511,7 @@ function printInbox(board: Board, io: Io): void {
     return;
   }
   const thread = (t: Task) => {
-    for (const e of board.thread(t.id)) {
+    for (const e of board.openThread(t.id)) {
       io.out(`      💬 ${e.item ? `(${e.item}번) ` : ''}${e.from === owner ? '사용자' : e.from}: ${e.text.split('\n')[0]}`);
     }
   };

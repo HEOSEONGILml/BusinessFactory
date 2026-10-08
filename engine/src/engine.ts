@@ -385,7 +385,7 @@ export class Engine {
     for (const task of this.board.list()) {
       if (this.chatActive.size + this.threadActive.size >= cap) return;
       if (this.threadActive.has(task.id)) continue;
-      const entries = this.board.thread(task.id);
+      const entries = this.board.openThread(task.id);
       const last = entries.at(-1);
       if (!last || last.from !== this.config.owner || last.n <= (cursors[task.id] ?? 0)) continue;
       if (!this.board.awaitsOwner(task, last.item)) continue;
@@ -436,7 +436,7 @@ export class Engine {
         ? `당신이 사용자에게 한 질문${item ? ` (${item}/${task.questions!.length}번)` : ''}: ${item ? task.questions!.find((q) => q.id === item)!.text : '`bf task show` 이력의 마지막 질문'}`
         : `이 목표는 ${STATUS_LABEL[task.status]} 상태로 끝났고, 사용자가 결과를 확인하는 중입니다. 결과물은 output/ 에 있습니다.`;
     const thread = this.board
-      .thread(task.id, item)
+      .openThread(task.id, item)
       .map((e) => `[${e.from === owner ? '사용자' : e.from}] ${e.text}`)
       .join('\n\n');
     return [

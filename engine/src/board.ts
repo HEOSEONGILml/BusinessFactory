@@ -96,6 +96,10 @@ export interface ThreadEntry {
   text: string;
   /** Which of several questions it is about (null: the item as a whole). */
   item: number | null;
+  /** Settled by a decision (answer, done, approval...): kept for the record, no longer open. */
+  closed?: boolean;
+  /** A marker, not a comment: the item was settled or reopened at this point. */
+  event?: 'closed' | 'reopened';
 }
 
 export interface Approval {
@@ -334,7 +338,7 @@ export class Board {
       }
       this.transition(doc, doc.task.review ? 'review' : 'done');
       this.save(doc);
-      if (ownerTask) this.clearThread(id);
+      if (ownerTask) this.closeThread(id, actor, '완료 보고');
       this.log(id, actor, '완료보고', summary);
       if (doc.task.status === 'done') this.settleParent(doc.task);
       return doc.task;
@@ -395,7 +399,7 @@ export class Board {
       const key = qs?.length ? item! : null;
       text = this.withThread(id, key, text);
       if (!text.trim()) throw new BoardError('답변 내용이 비어 있습니다.');
-      this.clearThread(id, key);
+      this.closeThread(id, actor, '답변 확정', key);
       if (qs?.length) {
         const q = qs.find((x) => x.id === item);
         if (!q) throw new BoardError(`${id} 에 ${item}번 질문은 없습니다.`);
@@ -460,7 +464,7 @@ export class Board {
       doc.task.ask_to = null;
       this.transition(doc, 'pending');
       this.save(doc);
-      this.clearThread(id);
+      this.closeThread(id, actor, '결재 승인');
       this.log(id, actor, '결재승인', [approval.what, note].filter(Boolean).join(' — '));
       return doc.task;
     });
@@ -476,7 +480,7 @@ export class Board {
       doc.task.ask_to = null;
       this.transition(doc, 'pending');
       this.save(doc);
-      this.clearThread(id);
+      this.closeThread(id, actor, '결재 반려');
       this.log(id, actor, '결재반려', `${approval.what} — ${reason}`);
       return doc.task;
     });
@@ -490,7 +494,7 @@ export class Board {
       if (!isTerminal(doc.task.status)) throw new BoardError(`${id} 는 아직 끝나지 않았습니다.`);
       doc.task.acknowledged = true;
       this.save(doc);
-      this.clearThread(id);
+      this.closeThread(id, actor, '확인 완료');
       this.log(id, actor, '확인', '');
       return doc.task;
     });
@@ -550,11 +554,40 @@ export class Board {
     return item === null && task.parent === null && isTerminal(task.status) && !task.acknowledged && task.status !== 'canceled';
   }
 
-  thread(id: string, item?: number | null): ThreadEntry[] {
+  /** Every comment the task ever had, with markers where it was settled or reopened. */
+  thread(id: string): ThreadEntry[] {
     const file = path.join(this.taskDir(id), 'thread.jsonl');
     if (!fs.existsSync(file)) return [];
-    const all = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as ThreadEntry);
-    return item === undefined ? all : all.filter((e) => e.item === item);
+    return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as ThreadEntry);
+  }
+
+  /** The comments still under discussion (not yet settled), for one item or all. */
+  openThread(id: string, item?: number | null): ThreadEntry[] {
+    return this.thread(id).filter((e) => !e.event && !e.closed && (item === undefined || e.item === item));
+  }
+
+  /**
+   * The owner takes back a finished (or given-up) task of their own to correct it and keep
+   * talking. It waits in the inbox again; whoever handed it out hears about it.
+   */
+  reopen(actor: string, id: string, reason = ''): Task {
+    return this.locked(() => {
+      const doc = this.read(id);
+      if (actor !== this.config.owner) throw new BoardError('사용자만 완료를 해제할 수 있습니다.');
+      if (!this.isOwnerTask(doc.task)) throw new BoardError(`${id} 는 사용자 업무가 아니라서 완료를 해제할 수 없습니다.`);
+      if (doc.task.status !== 'done' && doc.task.status !== 'canceled') throw new BoardError(`${id} 는 아직 끝나지 않았습니다.`);
+      const parent = doc.task.parent ? this.read(doc.task.parent).task : null;
+      if (parent && isTerminal(parent.status)) {
+        throw new BoardError(`상위 업무 ${parent.id} 가 이미 ${STATUS_LABEL[parent.status]} 상태라 다시 열 수 없습니다. 새 목표로 등록해 주세요.`);
+      }
+      // Finished is otherwise final; this is the one way back, and only for the owner's own work.
+      doc.task.status = 'pending';
+      this.save(doc);
+      this.appendThread(id, { from: actor, text: reason.trim() || '완료 해제', item: null, event: 'reopened' });
+      this.log(id, actor, '완료해제', reason);
+      if (parent) this.log(parent.id, 'system', '정정', `사용자가 ${id} (${doc.task.title}) 의 완료를 해제하고 다시 다룹니다${reason.trim() ? `: ${reason.trim()}` : ''}`);
+      return doc.task;
+    });
   }
 
   /**
@@ -570,9 +603,7 @@ export class Board {
       }
       if (!this.awaitsOwner(doc.task, item)) throw new BoardError(`${id}${item ? ` ${item}번 질문` : ''} 은(는) 처리할 일이 아닙니다.`);
       if (!text.trim()) throw new BoardError('코멘트 내용이 비어 있습니다.');
-      const prev = this.thread(id);
-      const entry: ThreadEntry = { n: (prev.at(-1)?.n ?? 0) + 1, at: this.timestamp(), from: actor, text: text.trim(), item };
-      fs.appendFileSync(path.join(this.taskDir(id), 'thread.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+      const entry = this.appendThread(id, { from: actor, text: text.trim(), item });
       this.save(doc); // updated_at moves, so open consoles refresh
       this.log(id, actor, item ? `코멘트 ${item}/${doc.task.questions!.length}` : '코멘트', text);
       return entry;
@@ -580,8 +611,14 @@ export class Board {
   }
 
   /** The answer the assignee gets: the whole discussion, then the owner's closing words. */
+  private appendThread(id: string, e: Omit<ThreadEntry, 'n' | 'at'>): ThreadEntry {
+    const entry: ThreadEntry = { n: (this.thread(id).at(-1)?.n ?? 0) + 1, at: this.timestamp(), ...e };
+    fs.appendFileSync(path.join(this.taskDir(id), 'thread.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+    return entry;
+  }
+
   private withThread(id: string, item: number | null, text: string): string {
-    const entries = this.thread(id, item);
+    const entries = this.openThread(id, item);
     if (entries.length === 0) return text;
     const owner = this.config.owner;
     const lines = entries.map((e) => `**${e.from === owner ? '사용자' : e.from}**: ${e.text}`);
@@ -589,12 +626,14 @@ export class Board {
     return ['코멘트로 나눈 내용:', '', ...lines].join('\n\n');
   }
 
-  private clearThread(id: string, item?: number | null): void {
-    const file = path.join(this.taskDir(id), 'thread.jsonl');
-    if (!fs.existsSync(file)) return;
-    const keep = item === undefined ? [] : this.thread(id).filter((e) => e.item !== item);
-    if (keep.length === 0) fs.rmSync(file);
-    else writeFileAtomic(file, keep.map((e) => JSON.stringify(e) + '\n').join(''));
+  /** The decision settles the open comments; they stay on file, marked, for the record. */
+  private closeThread(id: string, actor: string, label: string, item?: number | null): void {
+    const all = this.thread(id);
+    const hit = (e: ThreadEntry) => !e.event && !e.closed && (item === undefined || e.item === item);
+    if (!all.some(hit)) return;
+    for (const e of all) if (hit(e)) e.closed = true;
+    writeFileAtomic(path.join(this.taskDir(id), 'thread.jsonl'), all.map((e) => JSON.stringify(e) + '\n').join(''));
+    this.appendThread(id, { from: actor, text: label, item: item ?? null, event: 'closed' });
   }
 
   comment(actor: string, id: string, text: string): void {
@@ -630,7 +669,7 @@ export class Board {
       cancelTree(id);
       this.transition(doc, 'canceled');
       this.save(doc);
-      this.clearThread(id);
+      this.closeThread(id, actor, '취소');
       this.log(id, actor, '취소', reason);
       this.settleParent(doc.task);
       return doc.task;

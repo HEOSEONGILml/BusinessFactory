@@ -232,6 +232,7 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .cmt.me { border-left: 3px solid var(--info); }
 .cmt .h { font-size: 12.5px; color: var(--faint); margin-bottom: 2px; }
 .cmt .h b { color: var(--muted); }
+.thread .mark { font-size: 12.5px; color: var(--faint); text-align: center; padding: 2px 0; border-top: 1px dashed var(--line); }
 .cmt.typing { color: var(--muted); font-size: 13.5px; border-style: dashed; }
 .card .hint { color: var(--faint); font-size: 12.5px; }
 .drop-on { outline: 2px dashed var(--accent); outline-offset: 4px; }
@@ -659,7 +660,8 @@ function threadUI(x) {
   if (x.thread.at(-1)?.from === state.owner) {
     items.push(`<div class="cmt typing">💬 ${esc(x.assignee)} ${x.replying ? '이(가) 코멘트를 쓰고 있습니다…' : '이(가) 곧 확인합니다 (엔진이 켜져 있어야 합니다)'}</div>`);
   }
-  return items.length ? `<div class="thread">${items.join('')}</div>` : '';
+  const earlier = x.earlier?.length ? `<details class="hire"><summary>이전 코멘트 ${x.earlier.filter((e) => !e.event).length}건</summary>${threadHistory(x.earlier)}</details>` : '';
+  return earlier + (items.length ? `<div class="thread">${items.join('')}</div>` : '');
 }
 async function postComment(card) {
   const id = card.dataset.id, item = card.dataset.item ? Number(card.dataset.item) : null;
@@ -856,6 +858,17 @@ function renderLog(d, withTree, hideEngine) {
   }).join('');
 }
 
+// A task's whole comment history: settled rounds stay, with a divider where each was settled or reopened.
+function threadHistory(entries) {
+  if (!entries.length) return '<div class="empty">코멘트가 없습니다</div>';
+  const when = (iso) => new Date(iso).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return `<div class="thread">${entries.map((e) => {
+    const who = e.from === state.owner ? '나' : esc(e.from);
+    if (e.event) return `<div class="mark">${e.event === 'reopened' ? '↩︎' : '✔︎'} ${who} · ${esc(e.text)}${e.item ? ` (${e.item}번)` : ''} · ${when(e.at)}</div>`;
+    return `<div class="cmt${e.from === state.owner ? ' me' : ''}"><div class="h"><b>${who}</b> · ${when(e.at)}${e.item ? ` · ${e.item}번 질문` : ''}</div><div class="prose">${md(tidy(e.text))}</div></div>`;
+  }).join('')}</div>`;
+}
+
 // Back button inside the dialog: where we came from when following a link to another task.
 let dlgTrail = [];
 async function openTask(id, from) {
@@ -878,9 +891,10 @@ async function openTask(id, from) {
       <span>시도 ${t.attempts}/${t.max_attempts}</span><span>반려 ${t.rejections}/${t.max_rejections}</span>
     </div>
     ${d.tree.length ? `<h4>하위 업무 ${d.tree.length}건</h4><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${d.tree.map((c, k) => `<div class="trow" data-open="${c.id}" style="padding-left:${14 + (c.depth - 1) * 20}px${k === 0 ? ';border-top:none' : ''}"><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee === state.owner ? '나' : c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}</div>` : ''}
-    <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
+    <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="cmt">코멘트 (${d.thread.filter((e) => !e.event).length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
     <div data-pane="brief" class="prose">${md(d.body)}</div>
     <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint);font-weight:500">${(o.size / 1024).toFixed(1)}KB</span></button>`).join('')}</div><div id="fileView" class="prose" style="margin-top:16px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
+    <div data-pane="cmt" hidden>${threadHistory(d.thread)}</div>
     <div data-pane="log" hidden>
       <div class="logopts">
         ${d.tree.length ? `<label><input type="checkbox" id="logTree"${withTree ? ' checked' : ''}> 하위 업무 ${d.tree.length}건 이력 함께 보기</label>` : ''}
@@ -893,9 +907,10 @@ async function openTask(id, from) {
       return m ? `<div><span class="id">${new Date(m[1]).toLocaleTimeString()}</span> <b style="color:var(--text)">${esc(m[2])}</b> ${esc(m[3])}</div>` : `<div>${esc(l)}</div>`;
     }).join('') : '<div class="empty">기록 없음</div>'}</div>
     <h4>사용자 메모 · 조치</h4>
-    <textarea id="dlgNote" class="notebox" placeholder="코멘트나 취소 사유"></textarea>
+    ${d.owner.canReopen ? `<div class="meta">끝낸 내 업무입니다. 정정하거나 더 이야기할 게 있으면 <b>완료 해제</b>를 누르세요. 다시 처리할 일로 돌아가고, 아래에 적은 코멘트에는 ${esc(d.owner.responder)} 이(가) 답합니다.</div>` : ''}
+    <textarea id="dlgNote" class="notebox" placeholder="${d.owner.inInbox || d.owner.canReopen ? `코멘트를 달면 ${esc(d.owner.responder)} 이(가) 바로 확인하고 답합니다` : '이력에 남길 메모나 취소 사유'}"></textarea>
     <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn" id="dlgComment">코멘트 남기기</button>
+      ${d.owner.canReopen ? '<button class="btn primary" id="dlgReopen">완료 해제하고 코멘트 달기</button>' : `<button class="btn" id="dlgComment">${d.owner.inInbox ? '코멘트 달기' : '메모 남기기'}</button>`}
       ${open ? '<button class="btn danger" id="dlgCancel">이 업무 취소</button>' : ''}
     </div>`;
   const body = $('#dlgBody');
@@ -929,7 +944,16 @@ async function openTask(id, from) {
     const p = more.previousElementSibling; p.classList.toggle('clamp');
     more.textContent = p.classList.contains('clamp') ? '더 보기' : '접기';
   });
-  $('#dlgComment').onclick = () => { const v = $('#dlgNote').value.trim(); if (!v) return toast('내용을 적어 주세요', true); act(id, 'comment', { text: v }, '코멘트를 남겼습니다').then(() => openTask(id)); };
+  if ($('#dlgComment')) $('#dlgComment').onclick = () => { const v = $('#dlgNote').value.trim(); if (!v) return toast('내용을 적어 주세요', true); act(id, 'comment', { text: v }, '코멘트를 남겼습니다').then(() => openTask(id)); };
+  if ($('#dlgReopen')) $('#dlgReopen').onclick = async () => {
+    const v = $('#dlgNote').value.trim();
+    try {
+      await api(`/api/task/${id}/reopen`, {});
+      if (v) await api(`/api/task/${id}/thread`, { text: v });
+      toast(v ? '완료를 해제하고 코멘트를 달았습니다' : '완료를 해제했습니다. 처리할 일에서 이어서 이야기하세요');
+    } catch (e) { toast(e.message, true); }
+    await refresh(); openTask(id);
+  };
   const cancel = $('#dlgCancel');
   if (cancel) cancel.onclick = () => { if (!confirm(`${id} 와 그 하위 업무를 모두 취소할까요?`)) return; act(id, 'cancel', { reason: $('#dlgNote').value.trim() }, '취소했습니다').then(() => dlg.close()); };
   if (!dlg.open) dlg.showModal();

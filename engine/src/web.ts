@@ -128,7 +128,9 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
   // Who is replying to a comment right now, so the card can say so.
   const replying = new Set((engine.active ?? []).filter((r) => r.kind === 'comment').map((r) => r.taskId));
   const thread = (t: Task, item: number | null) => ({
-    thread: board.thread(t.id, item),
+    thread: board.openThread(t.id, item),
+    // Settled earlier rounds (e.g. before the owner reopened it), shown folded for context.
+    earlier: board.thread(t.id).filter((e) => (e.closed || e.event) && (item === null || e.item === item)),
     replying: replying.has(t.id),
   });
   const approvals = tasks
@@ -257,6 +259,14 @@ function taskDetail(board: Board, id: string) {
     task: { ...task, label: statusLabel(task) },
     body,
     log: board.readLog(id),
+    // The whole comment history, settled rounds included, and what the owner can do with it now.
+    thread: board.thread(id),
+    owner: {
+      inInbox: board.awaitsOwner(task),
+      responder: board.responder(task),
+      canReopen: board.isOwnerTask(task) && (task.status === 'done' || task.status === 'canceled') &&
+        !(task.parent && isTerminal(board.read(task.parent).task.status)),
+    },
     activity,
     outputs,
     children: board.children(id).map((c) => ({ id: c.id, title: c.title, status: c.status, label: statusLabel(c), assignee: c.assignee })),
@@ -363,6 +373,7 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
     answer: (id, b) => board.answer(owner, id, String(b.text ?? ''), Number.isInteger(b.item) ? b.item : undefined),
     ack: (id) => board.acknowledge(owner, id),
     finish: (id, b) => board.done(owner, id, String(b.text ?? '')),
+    reopen: (id, b) => board.reopen(owner, id, String(b.reason ?? '')),
     cancel: (id, b) => board.cancel(owner, id, String(b.reason ?? '')),
     // On an inbox item a comment joins its thread, so the employee answers it.
     comment: (id, b) =>
