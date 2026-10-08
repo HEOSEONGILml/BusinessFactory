@@ -1,0 +1,4 @@
+# Shell scripts must keep LF or Git Bash cannot run them; batch files want CRLF.
+bin/bf text eol=lf
+*.sh text eol=lf
+*.cmd text eol=crlf
