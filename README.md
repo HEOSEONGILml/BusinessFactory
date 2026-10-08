@@ -2,6 +2,12 @@
 
 AI 직원들이 사람 대신 일하는 범용 업무 시스템. 사용자는 목표를 주고 결재만 한다. 설계는 [docs/DESIGN.md](docs/DESIGN.md), 서버 설치는 [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md) 참고.
 
+![대시보드: 직원별 책상, 처리할 일, 업무 현황, 실시간 활동](docs/images/dashboard.png)
+
+| 업무 상세 (하위 업무, 지시서, 결과물, 이력) | 직원 설정 (직무, 모델, 도구, 권한) |
+|---|---|
+| ![업무 상세](docs/images/task.png) | ![직원 설정](docs/images/staff.png) |
+
 ## 요구 사항
 
 - Node.js 24 이상
