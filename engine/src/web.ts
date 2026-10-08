@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listAgents } from './agents.ts';
+import { imageType, MAX_UPLOAD, resolveAttachment, saveAttachment } from './attachments.ts';
 import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, normalizeId, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
@@ -240,13 +241,30 @@ function taskDetail(board: Board, id: string) {
   };
 }
 
-function readOutput(board: Board, id: string, rel: string): string {
+function outputPath(board: Board, id: string, rel: string): string {
   const outDir = path.resolve(board.taskDir(id), 'output');
   const full = path.resolve(outDir, rel);
   if (!full.startsWith(outDir + path.sep)) throw new BoardError('결과물 폴더 밖의 파일은 볼 수 없습니다.');
   if (!fs.existsSync(full)) throw new BoardError('파일이 없습니다.');
+  return full;
+}
+
+function readOutput(board: Board, id: string, rel: string): string {
+  const full = outputPath(board, id, rel);
   if (fs.statSync(full).size > MAX_FILE) throw new BoardError('파일이 너무 커서 화면에 표시할 수 없습니다.');
   return fs.readFileSync(full, 'utf8');
+}
+
+/** Raw request body, for image uploads. */
+async function readRaw(req: http.IncomingMessage, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new BoardError(`이미지는 ${limit / 1024 / 1024}MB 까지 올릴 수 있습니다.`);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readBody(req: http.IncomingMessage): Promise<string> {
@@ -282,6 +300,16 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
   const send = (res: http.ServerResponse, code: number, body: unknown, type = 'application/json; charset=utf-8') => {
     res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     res.end(typeof body === 'string' ? body : JSON.stringify(body));
+  };
+  // Images may come from employees (an SVG can carry script): served sandboxed, never as a page.
+  const sendImage = (res: http.ServerResponse, full: string, type: string) => {
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    });
+    fs.createReadStream(full).pipe(res);
   };
 
   const actions: Record<string, (id: string, b: Record<string, any>) => unknown> = {
@@ -344,8 +372,18 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
       }
       if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'task' && parts[2]) {
         const id = normalizeId(parts[2]);
+        if (parts[3] === 'file' && url.searchParams.has('raw')) {
+          const full = outputPath(board, id, url.searchParams.get('path') ?? '');
+          const type = imageType(full);
+          if (!type) throw new BoardError('이미지 파일만 바로 볼 수 있습니다.');
+          return sendImage(res, full, type);
+        }
         if (parts[3] === 'file') return send(res, 200, { text: readOutput(board, id, url.searchParams.get('path') ?? '') });
         return send(res, 200, taskDetail(board, id));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/attachment') {
+        const { full, type } = resolveAttachment(paths, url.searchParams.get('path') ?? '');
+        return sendImage(res, full, type);
       }
       if (req.method === 'GET' && url.pathname === '/api/staff') {
         const tasks = board.list();
@@ -374,6 +412,11 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
 
       if (req.method === 'POST') {
         if (req.headers['x-bf-token'] !== token) return send(res, 403, { error: '페이지를 새로고침해 주세요.' });
+        if (url.pathname === '/api/upload') {
+          const file = saveAttachment(paths, await readRaw(req, MAX_UPLOAD));
+          log(`웹: 이미지 첨부 ${path.basename(file)}`);
+          return send(res, 200, { path: file });
+        }
         const body = await readJson(req);
         if (url.pathname === '/api/goal') {
           const text = String(body.text ?? '').trim();
