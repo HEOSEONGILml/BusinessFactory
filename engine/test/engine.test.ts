@@ -23,7 +23,7 @@ interface Invocation {
   actor: string;
 }
 
-function setup(plan: Record<string, string>, overrides: Partial<Config> = {}) {
+function setup(plan: Record<string, string>, overrides: Partial<Config> = {}, extraEnv: Record<string, string> = {}) {
   const root = makeRoot();
   const paths = resolvePaths({ BF_ROOT: root });
   const fakeLog = path.join(root, 'fake.jsonl');
@@ -39,6 +39,7 @@ function setup(plan: Record<string, string>, overrides: Partial<Config> = {}) {
         ANTHROPIC_API_KEY: 'must-be-stripped',
         FAKE_PLAN: JSON.stringify(plan),
         FAKE_LOG: fakeLog,
+        ...extraEnv,
       }),
   });
   const calls = (): Invocation[] =>
@@ -178,6 +179,29 @@ describe('엔진', () => {
     await engine.drain();
     const first = calls().map((c) => c.task);
     assert.deepEqual(first.sort(), ['T0001', 'T0003']);
+  });
+
+  it('직원의 활동을 실시간으로 기록한다', async () => {
+    const { engine, board, logs } = setup({ ceo: 'done', reviewer: 'pass' });
+    goal(board);
+    await engine.runUntilIdle();
+    assert.ok(logs.some((l) => l.includes('T0001 ceo ▸ 쓰기 output')), logs.join('\n'));
+    assert.ok(logs.some((l) => l.includes('T0001 ceo ▸ 💬 ceo 작업 중')));
+    const activity = fs.readFileSync(path.join(board.taskDir('T0001'), 'activity.log'), 'utf8');
+    assert.match(activity, /\[ceo\] 쓰기 output/);
+    assert.match(activity, /\[reviewer\] 쓰기 output/);
+  });
+
+  it('구독 사용량이 상한을 넘으면 새 업무를 시작하지 않는다', async () => {
+    const { engine, board, calls, notices, paths } = setup({ ceo: 'done', reviewer: 'pass' }, {}, { FAKE_UTIL: '0.95' });
+    goal(board);
+    goal(board, '두번째');
+    await engine.runUntilIdle();
+    assert.equal(calls().length, 2, '이미 시작한 두 건만 끝내고 멈춘다');
+    assert.ok(engine.pausedUntilTime);
+    assert.ok(notices.some((n) => n.title === '사용량 상한으로 휴식'));
+    const snap = JSON.parse(fs.readFileSync(path.join(paths.company, '.engine-usage.json'), 'utf8'));
+    assert.equal(snap.windows.five_hour.utilization, 0.95);
   });
 
   it('재시작 시 진행 중으로 남은 업무를 대기로 되돌린다', () => {

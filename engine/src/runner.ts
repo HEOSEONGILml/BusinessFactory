@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { AgentInfo } from './agents.ts';
+import { parseStreamLine } from './stream.ts';
+import type { RunEvent } from './stream.ts';
 
 /** Tools that read files; their access is granted per directory through Read rules. */
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS']);
@@ -72,6 +74,8 @@ export interface RunSpec {
   env: Record<string, string>;
   /** Prepended to PATH so the employee can call `bf`. */
   binDir: string;
+  /** Live activity and usage while the employee works. */
+  onEvent?: (e: RunEvent) => void;
 }
 
 export interface RunResult {
@@ -95,7 +99,8 @@ export function buildArgs(spec: RunSpec): string[] {
     '-p',
     '--agents', spec.agentsFile,
     '--agent', spec.agent.name,
-    '--output-format', 'json',
+    '--output-format', 'stream-json',
+    '--verbose',
     '--permission-mode', 'dontAsk',
     '--strict-mcp-config',
     '--max-turns', String(spec.maxTurns),
@@ -139,7 +144,23 @@ export function runAgent(spec: RunSpec, baseEnv: NodeJS.ProcessEnv = process.env
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    child.stdout.setEncoding('utf8').on('data', (d) => (stdout += d));
+    let pending = '';
+    child.stdout.setEncoding('utf8').on('data', (d: string) => {
+      stdout += d;
+      if (!spec.onEvent) return;
+      pending += d;
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        for (const ev of parseStreamLine(line, spec.cwd)) {
+          try {
+            spec.onEvent(ev);
+          } catch {
+            // Observers must never break a run.
+          }
+        }
+      }
+    });
     child.stderr.setEncoding('utf8').on('data', (d) => (stderr += d));
     const timer = setTimeout(() => {
       timedOut = true;
@@ -180,13 +201,21 @@ export function parseRunOutput(
     apiErrorStatus: null,
     stderr: stderr.trim(),
   };
+  // stream-json ends with a {"type":"result"} line; plain json is just that line.
   let json: Record<string, unknown> | null = null;
-  try {
-    // The JSON result is the last non-empty line.
-    const last = stdout.trim().split('\n').pop() ?? '';
-    json = JSON.parse(last);
-  } catch {
-    return { ...base, text: timedOut ? '실행 시간 초과' : (stdout.trim() || stderr.trim() || '출력 없음') };
+  for (const line of stdout.trim().split('\n').reverse()) {
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed?.type === 'result') {
+        json = parsed;
+        break;
+      }
+    } catch {
+      // not JSON (or a partial line from a killed process)
+    }
+  }
+  if (!json) {
+    return { ...base, text: timedOut ? '실행 시간 초과' : (stderr.trim() || '결과 없음') };
   }
   const denials = Array.isArray(json!.permission_denials) ? json!.permission_denials : [];
   return {

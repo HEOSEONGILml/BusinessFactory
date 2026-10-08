@@ -10,6 +10,8 @@ import { commitCompany, staffChanges, systemStatus } from './git.ts';
 import type { Paths } from './paths.ts';
 import { agentToolList, isUsageLimit, parseResetTime, runAgent } from './runner.ts';
 import { dueSchedules } from './schedule.ts';
+import { WINDOW_LABEL } from './stream.ts';
+import type { RunEvent, UsageSnapshot } from './stream.ts';
 import { buildSender, OwnerNotifier } from './notify.ts';
 import type { Sender } from './notify.ts';
 import type { Access, RunResult, RunSpec } from './runner.ts';
@@ -64,7 +66,7 @@ export class Engine {
     this.now = opts.now ?? (() => new Date());
     this.board = new Board(paths, config, this.now);
     this.run = opts.run ?? ((spec) => runAgent(spec));
-    this.log = opts.log ?? ((line) => console.log(`[${this.now().toLocaleTimeString()}] ${line}`));
+    this.log = opts.log ?? ((line) => this.defaultLog(line));
     this.notify = opts.notify ?? buildSender(config.notify, this.log);
     this.ownerNotifier = new OwnerNotifier(paths, this.notify);
   }
@@ -141,6 +143,63 @@ export class Engine {
 
   // ---- scheduling ----
 
+  /** Console plus company/engine.log, so the history survives closing the window. */
+  private defaultLog(line: string): void {
+    const stamped = `[${this.now().toLocaleString()}] ${line}`;
+    console.log(`[${this.now().toLocaleTimeString()}] ${line}`);
+    try {
+      fs.appendFileSync(path.join(this.paths.company, 'engine.log'), stamped + '\n', 'utf8');
+    } catch {
+      // logging must never stop the company
+    }
+  }
+
+  private onRunEvent(taskId: string, agent: string, ev: RunEvent): void {
+    if (ev.kind === 'activity') {
+      this.log(`  ${taskId} ${agent} ▸ ${ev.text}`);
+      try {
+        fs.appendFileSync(
+          path.join(this.board.taskDir(taskId), 'activity.log'),
+          `${this.now().toISOString()} [${agent}] ${ev.text}\n`,
+          'utf8',
+        );
+      } catch {
+        // task folder may be gone if the task was cancelled mid-run
+      }
+    } else {
+      this.onUsage(ev.usage);
+    }
+  }
+
+  /**
+   * Remember the latest subscription usage and stop starting new work once a window passes
+   * its ceiling, so the company never eats the allowance the owner needs for personal use.
+   */
+  private onUsage(usage: UsageSnapshot): void {
+    writeFileAtomic(
+      path.join(this.paths.company, '.engine-usage.json'),
+      JSON.stringify({ at: this.now().toISOString(), ...usage }, null, 2),
+    );
+    const ceiling = this.config.usage_ceiling as Record<string, number>;
+    let until = 0;
+    const reasons: string[] = [];
+    for (const [name, w] of Object.entries(usage.windows)) {
+      const limit = ceiling[name];
+      if (limit !== undefined && w.utilization >= limit) {
+        until = Math.max(until, w.resetsAt * 1000);
+        reasons.push(`${WINDOW_LABEL[name] ?? name} ${Math.round(w.utilization * 100)}% (상한 ${Math.round(limit * 100)}%)`);
+      }
+    }
+    if (until > this.now().getTime() && (!this.pausedUntil || this.pausedUntil.getTime() < until)) {
+      this.pausedUntil = new Date(until + 60_000);
+      this.log(`사용량 상한 도달: ${reasons.join(', ')}. ${this.pausedUntil.toLocaleString()} 까지 새 업무를 시작하지 않음`);
+      this.notify({
+        title: '사용량 상한으로 휴식',
+        body: `${reasons.join(', ')}\n${this.pausedUntil.toLocaleString()} 에 자동으로 다시 일합니다.`,
+      });
+    }
+  }
+
   private fireSchedules(): void {
     let due;
     try {
@@ -191,6 +250,7 @@ export class Engine {
     this.log(`${task.id} ${kind === 'review' ? '검수' : '실행'} 시작 → ${agent.name}: ${task.title}`);
 
     const spec = this.buildSpec(task, kind, agent);
+    spec.onEvent = (ev) => this.onRunEvent(task.id, agent.name, ev);
     const entry: ActiveRun = { taskId: task.id, kind, agent: agent.name, workspace: task.workspace, promise: Promise.resolve() };
     entry.promise = this.run(spec)
       .then((result) => this.handleResult(task.id, kind, agent, result))

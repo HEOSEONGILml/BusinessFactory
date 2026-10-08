@@ -29,10 +29,13 @@ Windows 명령 프롬프트/PowerShell 에서는 `bin\bf.cmd` 를 쓴다.
 | 질문에 답하기 | `bf task answer <번호> "답"` |
 | 업무 내용과 이력 보기 | `bf task show <번호>` |
 | 끝난 목표 확인 처리 | `bf ack <번호>` |
-| 사용량 보기 | `bf usage` |
+| 직원들이 지금 하는 일 실시간 보기 | `bf watch` (특정 업무만: `bf watch <번호>`) |
+| 사용량 보기 (구독 사용 비율 포함) | `bf usage` |
 | 목표 취소 | `bf task cancel <번호>` |
 
 엔진이 켜져 있으면 결재 요청, 직원 질문, 목표 완료, 엔진 정지 때 Windows 알림이 뜬다. 휴대폰 알림은 `company/config.yaml` 의 `notify.ntfy_topic` 에 ntfy 주제 이름을 넣으면 켜진다.
+
+엔진 창과 `company/engine.log` 에 직원의 행동(읽은 파일, 쓴 파일, 실행한 명령, 웹 검색)이 실시간으로 기록되고, 업무별로는 `board/<번호>/activity.log` 에 남는다. 구독 사용량이 `usage_ceiling`(기본 90%)을 넘으면 리셋될 때까지 새 업무를 시작하지 않는다 — 사용자가 직접 쓸 몫을 남기기 위해서다.
 
 설정(동시 실행 수, 재시도 횟수 등)은 `company/config.yaml`, 정기 업무는 `company/schedules.yaml`.
 

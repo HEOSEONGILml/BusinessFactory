@@ -37,7 +37,7 @@ export function initCompany(paths: Paths, opts: { git: boolean }): InitResult {
     [paths.config]: '# 회사 설정. 비어 있는 항목은 기본값을 따른다.\n' + YAML.stringify({ ...DEFAULT_CONFIG, project_priority: {} }),
     [path.join(paths.company, 'schedules.yaml')]: SCHEDULES_TEMPLATE,
     [path.join(paths.memory, 'index.md')]: '# 회사 기억 목차\n',
-    [path.join(paths.company, '.gitignore')]: '.lock\n.engine/\n.engine-schedule.json\n.engine-notified.json\n.run/\n*.tmp\n',
+    [path.join(paths.company, '.gitignore')]: '.lock\n.engine/\n.engine-schedule.json\n.engine-notified.json\n.engine-usage.json\nengine.log\n.run/\n*.tmp\n',
   };
   const handbookTemplate = path.join(paths.templates, 'handbook.md');
   if (fs.existsSync(handbookTemplate)) files[paths.handbook] = fs.readFileSync(handbookTemplate, 'utf8');

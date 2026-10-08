@@ -25,6 +25,11 @@ export interface Config {
   poll_seconds: number;
   /** Added to the priority of every task in that project (where to spend the allowance first). */
   project_priority: Record<string, number>;
+  /**
+   * Stop starting new work when a subscription window's used share reaches this (0..1).
+   * Leaves room for the owner's own Claude use. Windows: five_hour, seven_day.
+   */
+  usage_ceiling: Record<string, number>;
   /** How the owner is told that something needs them. */
   notify: NotifyConfig;
   /** Command that starts Claude Code; extra elements are leading arguments. */
@@ -44,11 +49,14 @@ export const DEFAULT_CONFIG: Config = {
   poll_seconds: 5,
   project_priority: {},
   notify: DEFAULT_NOTIFY,
+  usage_ceiling: { five_hour: 0.9, seven_day: 0.9 },
   claude_command: ['claude'],
 };
 
 export function loadConfig(paths: Paths): Config {
   if (!fs.existsSync(paths.config)) return { ...DEFAULT_CONFIG };
   const raw = YAML.parse(fs.readFileSync(paths.config, 'utf8')) ?? {};
-  return { ...DEFAULT_CONFIG, ...raw, notify: { ...DEFAULT_NOTIFY, ...(raw.notify ?? {}) } };
+  return { ...DEFAULT_CONFIG, ...raw, notify: { ...DEFAULT_NOTIFY, ...(raw.notify ?? {}) },
+    usage_ceiling: { ...DEFAULT_CONFIG.usage_ceiling, ...(raw.usage_ceiling ?? {}) },
+  };
 }

@@ -10,6 +10,7 @@ import { Engine } from './engine.ts';
 import { addMemory, listMemory, readMemory } from './memory.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
+import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
 import { resolvePaths } from './paths.ts';
 
 const HELP = `bf — BusinessFactory 업무 보드
@@ -25,7 +26,8 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf approve <id> [--note "<메모>"]        결재 승인 (채용 포함)
   bf deny <id> "<사유>"                    결재 반려
   bf ack <id>                             완료된 목표 확인 처리
-  bf usage [--days n]                     사용량 요약
+  bf usage [--days n]                     사용량 요약 (구독 사용 비율 포함)
+  bf watch [<id>]                         직원들의 활동을 실시간으로 보기
 
 업무
   bf task create --to <직원> --title "<제목>" --done-when "<조건>" [--done-when ...]
@@ -246,6 +248,8 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
 
     case 'usage': {
       const { values } = parseArgs({ args: argv.slice(1), options: { days: { type: 'string' } } });
+      const snap = readUsageSnapshot(paths);
+      if (snap) io.out(formatUsageSnapshot(snap));
       printUsage(paths, Number(values.days ?? 7), io.out);
       return 0;
     }
@@ -470,8 +474,14 @@ function printStatus(board: Board, io: Io): void {
   const active = tasks.filter((t) => t.status === 'running');
   if (active.length) {
     io.out('\n진행 중');
-    for (const t of active) io.out(`  ${formatRow(t)}`);
+    for (const t of active) {
+      io.out(`  ${formatRow(t)}`);
+      const last = lastActivity(board.taskDir(t.id));
+      if (last) io.out(`      ▸ ${last}`);
+    }
   }
+  const snap = readUsageSnapshot(board.paths);
+  if (snap) io.out(`\n${formatUsageSnapshot(snap)}`);
 }
 
 /** Blocked-on-approval reads as 결재대기, other blocks as 질문대기. */
@@ -552,9 +562,19 @@ function isAlive(pid: number): boolean {
 }
 
 if (import.meta.main) {
+  // Output piped into something that stopped reading (e.g. `| head`): just stop.
+  process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') process.exit(0);
+    throw err;
+  });
   const argv = process.argv.slice(2);
   if (argv[0] === 'engine') {
     runEngine(argv.slice(1)).then((code) => (process.exitCode = code));
+  } else if (argv[0] === 'watch') {
+    const ac = new AbortController();
+    process.once('SIGINT', () => ac.abort());
+    const filter = argv[1] ? normalizeId(argv[1]) : null;
+    watch(resolvePaths(), filter, ac.signal);
   } else {
     process.exitCode = main(argv);
   }

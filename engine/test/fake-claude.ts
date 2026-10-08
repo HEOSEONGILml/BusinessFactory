@@ -42,6 +42,28 @@ const bf = (...a: string[]) => {
 };
 
 function reply(result: string, extra: Record<string, unknown> = {}) {
+  // Mimic --output-format stream-json: activity and usage events, then the result line.
+  const line = (o: object) => process.stdout.write(JSON.stringify(o) + '\n');
+  line({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', name: 'Write', input: { file_path: path.join(process.cwd(), 'output', 'result.md') } },
+        { type: 'text', text: `${agent} 작업 중` },
+      ],
+    },
+  });
+  const util = Number(process.env.FAKE_UTIL ?? '0.1');
+  line({
+    type: 'rate_limit_event',
+    rate_limit_info: {
+      status: 'allowed',
+      unifiedWindows: {
+        five_hour: { utilization: util, resetsAt: Math.floor(Date.now() / 1000) + 3600 },
+        seven_day: { utilization: 0.2, resetsAt: Math.floor(Date.now() / 1000) + 86400 },
+      },
+    },
+  });
   process.stdout.write(
     JSON.stringify({
       type: 'result',
