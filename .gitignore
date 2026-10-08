@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# BusinessFactory runtime data (separate git repos)
+node_modules/
+/company/
+/workspaces/

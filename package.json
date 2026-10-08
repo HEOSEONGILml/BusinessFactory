@@ -1,0 +1,23 @@
+{
+  "name": "business-factory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "General-purpose system where AI agents work as employees",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node engine/src/cli.ts engine",
+    "bf": "node engine/src/cli.ts",
+    "test": "node --test \"engine/test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "typescript": "^5.9.3"
+  }
+}

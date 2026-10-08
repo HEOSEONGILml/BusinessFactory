@@ -1,0 +1,3 @@
+#!/bin/sh
+# bf — BusinessFactory task board CLI (used by the owner and by AI employees)
+exec node "$(dirname "$0")/../engine/src/cli.ts" "$@"
