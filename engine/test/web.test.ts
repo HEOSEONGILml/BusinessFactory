@@ -102,6 +102,44 @@ describe('웹 화면', () => {
     const bad = await fetch(`${BASE}/api/task/${id}/file?path=${encodeURIComponent('../task.md')}`);
     assert.equal(bad.status, 400);
   });
+
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const upload = (body: Buffer, tok = token) =>
+    fetch(`${BASE}/api/upload`, { method: 'POST', headers: { 'Content-Type': 'image/png', 'X-BF-Token': tok }, body: new Uint8Array(body) });
+
+  it('이미지를 올리면 보드 첨부 폴더에 저장되고, 직원이 읽을 경로를 돌려준다', async () => {
+    assert.equal((await upload(PNG, 'wrong')).status, 403);
+    const r = await upload(PNG);
+    assert.equal(r.status, 200);
+    const { path: file } = await r.json();
+    assert.match(file, /[\\/]board[\\/]attachments[\\/][\w-]+\.png$/);
+    assert.deepEqual(fs.readFileSync(file), PNG);
+
+    const img = await fetch(`${BASE}/api/attachment?path=${encodeURIComponent(file)}`);
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get('content-type'), 'image/png');
+    assert.match(img.headers.get('content-security-policy') ?? '', /sandbox/);
+    assert.deepEqual(Buffer.from(await img.arrayBuffer()), PNG);
+  });
+
+  it('이미지가 아니거나 첨부 폴더 밖의 파일은 거부한다', async () => {
+    const fake = await upload(Buffer.from('<svg onload="alert(1)"/>'));
+    assert.equal(fake.status, 400);
+    assert.match((await fake.json()).error, /PNG, JPG/);
+    const id = board.list()[0].id;
+    const outside = await fetch(`${BASE}/api/attachment?path=${encodeURIComponent(path.join(board.taskDir(id), 'task.md'))}`);
+    assert.equal(outside.status, 400);
+  });
+
+  it('결과물 이미지는 그림 그대로 보여 준다', async () => {
+    const id = board.list()[0].id;
+    fs.writeFileSync(path.join(board.taskDir(id), 'output', 'chart.png'), PNG);
+    const r = await fetch(`${BASE}/api/task/${id}/file?raw=1&path=chart.png`);
+    assert.equal(r.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), PNG);
+    const text = await fetch(`${BASE}/api/task/${id}/file?raw=1&path=report.md`);
+    assert.equal(text.status, 400);
+  });
 });
 
 describe('웹 화면 로그인', () => {

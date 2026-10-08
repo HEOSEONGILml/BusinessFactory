@@ -1,0 +1,22 @@
+#!/bin/sh
+# bf-watchdog — restarts the engine service when its process is gone or its loop stopped beating.
+# Run by the businessfactory-watchdog systemd timer (as root). Halts are resumed by the engine itself.
+SERVICE="${BF_SERVICE:-businessfactory}"
+cd "$(dirname "$0")/.." || exit 1
+
+case "$(systemctl is-active "$SERVICE")" in
+  activating|deactivating|reloading) exit 0 ;;  # starting up, or finishing runs before a stop
+esac
+
+owner="$(stat -c %U .)"
+if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then
+  msg="$(runuser -u "$owner" -- node engine/src/cli.ts engine-check)"
+else
+  msg="$(node engine/src/cli.ts engine-check)"
+fi
+code=$?
+[ "$code" = 0 ] && exit 0
+
+echo "$msg — $SERVICE 재시작"
+echo "[$(date '+%-m/%-d/%Y, %-I:%M:%S %p')] 감시: $msg — 서비스 재시작" >> company/engine.log
+systemctl restart "$SERVICE"

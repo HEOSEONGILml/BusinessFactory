@@ -49,6 +49,12 @@ export interface Config {
   notify: NotifyConfig;
   /** Command that starts Claude Code; extra elements are leading arguments. */
   claude_command: string[];
+  /**
+   * Self-recovery. auto_resume_minutes: after a halt, switch back on by itself after this long
+   * (doubling each time in a row, up to 6 hours; 0 = wait for the owner). stale_seconds: `bf engine-check`
+   * reports the engine as hung when its heartbeat is older than this.
+   */
+  watchdog: { auto_resume_minutes: number; stale_seconds: number };
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -68,6 +74,7 @@ export const DEFAULT_CONFIG: Config = {
   web: { enabled: true, port: 4300, open_browser: true, allowed_hosts: [] },
   chat: { max_concurrency: 2, max_chain: 3, max_turns: 12, timeout_minutes: 5, meeting_turns_per_participant: 2 },
   claude_command: ['claude'],
+  watchdog: { auto_resume_minutes: 10, stale_seconds: 120 },
 };
 
 export function loadConfig(paths: Paths): Config {
@@ -77,5 +84,6 @@ export function loadConfig(paths: Paths): Config {
     usage_ceiling: { ...DEFAULT_CONFIG.usage_ceiling, ...(raw.usage_ceiling ?? {}) },
     web: { ...DEFAULT_CONFIG.web, ...(raw.web ?? {}) },
     chat: { ...DEFAULT_CONFIG.chat, ...(raw.chat ?? {}) },
+    watchdog: { ...DEFAULT_CONFIG.watchdog, ...(raw.watchdog ?? {}) },
   };
 }

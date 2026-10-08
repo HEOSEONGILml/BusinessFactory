@@ -210,6 +210,20 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .prose li { margin: 3px 0; }
 .card .prose { font-size: 15px; line-height: 1.7; }
 
+/* ---------- image attachments ---------- */
+.attach { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.attach .thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.attach .thumbs:empty { display: none; }
+.thumb { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line-strong); background: var(--bg); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.loading { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+.thumb button { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 13px; line-height: 20px; padding: 0; }
+.card .attach { margin-top: 8px; }
+.drop-on { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.att { display: inline-block; margin: 4px 6px 4px 0; vertical-align: top; }
+.att img { max-width: min(320px, 100%); max-height: 240px; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.out-img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+
 /* ---------- engine switch ---------- */
 .engine-ctl { display: flex; gap: 8px; align-items: center; }
 
@@ -274,6 +288,7 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
 .typing b { color: var(--text); }
 .typing .dots::after { content: "…"; animation: pulse 1s infinite; }
 .chat-compose { border-top: 1px solid var(--line); padding: 12px 16px; display: flex; gap: 10px; align-items: flex-end; }
+.chat-compose { flex-wrap: wrap; }
 .chat-compose textarea { flex: 1; min-height: 48px; max-height: 220px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 10px; padding: 11px 13px; background: var(--bg); font-size: 15px; line-height: 1.55; }
 .chat-empty { flex: 1; display: grid; place-items: center; color: var(--faint); text-align: center; padding: 30px; }
 @media (max-width: 900px) { .chat { grid-template-columns: 1fr; height: auto; } .msgs { max-height: 60vh; } }
@@ -302,6 +317,7 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
       <label>작업 공간 <select id="goalWorkspace"><option value="">없음</option></select></label>
       <label>프로젝트 <input id="goalProject" list="projects" placeholder="선택 사항" size="12"></label>
       <datalist id="projects"></datalist>
+      <span id="goalAttach"></span>
       <span style="flex:1"></span>
       <span class="hint">Ctrl+Enter</span>
       <button class="btn primary" id="goalSubmit">목표 등록</button>
@@ -421,11 +437,89 @@ async function act(id, action, body, okMsg) {
   catch (e) { toast(e.message, true); }
 }
 
+/* ---------- image attachments ---------- */
+// Pending images per input box ('goal', 'q:<id>:<item>', 'c:<conv>'); kept across re-renders.
+const attachments = new Map();
+const ATTACH_LABEL = '📎 첨부 이미지 (직원은 Read 도구로 파일을 열어 볼 것)';
+function attachUI(key) {
+  const list = attachments.get(key) ?? [];
+  const thumbs = list.map((a, i) => a.path
+    ? `<span class="thumb"><img src="/api/attachment?path=${encodeURIComponent(a.path)}" alt=""><button type="button" data-unattach="${i}" title="빼기">×</button></span>`
+    : '<span class="thumb loading">올리는 중</span>').join('');
+  return `<div class="attach" data-attach="${esc(key)}"><button type="button" class="btn small" data-pick title="이미지 첨부 (붙여 넣기, 끌어다 놓기도 됩니다)">📎 이미지</button>
+    <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden><span class="thumbs">${thumbs}</span></div>`;
+}
+function redrawAttach(key) {
+  document.querySelectorAll('[data-attach]').forEach((el) => { if (el.dataset.attach === key) el.outerHTML = attachUI(key); });
+}
+const uploading = (key) => (attachments.get(key) ?? []).some((a) => !a.path);
+function withAttachments(text, key) {
+  const done = (attachments.get(key) ?? []).filter((a) => a.path);
+  if (!done.length) return text;
+  return `${text ? text + '\n\n' : ''}${ATTACH_LABEL}\n${done.map((a) => `![${a.name.replace(/[[\]()]/g, '')}](${a.path})`).join('\n')}`;
+}
+function clearAttachments(key) { attachments.delete(key); redrawAttach(key); }
+async function addImages(key, files) {
+  const list = attachments.get(key) ?? [];
+  attachments.set(key, list);
+  for (const file of files) {
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) { toast(`${file.name}: PNG, JPG, GIF, WEBP 만 올릴 수 있습니다`, true); continue; }
+    if (file.size > 10 * 1024 * 1024) { toast(`${file.name}: 10MB 까지 올릴 수 있습니다`, true); continue; }
+    const entry = { name: file.name || 'image', path: null };
+    list.push(entry); redrawAttach(key);
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', headers: { 'X-BF-Token': TOKEN, 'Content-Type': file.type }, body: file });
+      if (res.status === 401) { location.href = '/login'; return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '올리기 실패');
+      entry.path = data.path;
+    } catch (e) {
+      list.splice(list.indexOf(entry), 1); toast(e.message, true);
+    }
+    redrawAttach(key);
+  }
+}
+// The attach box that belongs to wherever the event happened (goal composer, question card, chat).
+function attachKeyFor(el) {
+  const scope = el.closest('.composer, .card, .chat-compose');
+  return scope?.querySelector('[data-attach]')?.dataset.attach ?? null;
+}
+document.addEventListener('click', (ev) => {
+  const pick = ev.target.closest('[data-pick]');
+  if (pick) return pick.parentElement.querySelector('input[type=file]').click();
+  const un = ev.target.closest('[data-unattach]');
+  if (un) { const key = un.closest('[data-attach]').dataset.attach; attachments.get(key)?.splice(Number(un.dataset.unattach), 1); redrawAttach(key); }
+});
+document.addEventListener('change', (ev) => {
+  const box = ev.target.closest?.('[data-attach]');
+  if (box && ev.target.type === 'file') addImages(box.dataset.attach, [...ev.target.files]);
+});
+document.addEventListener('paste', (ev) => {
+  const key = ev.target instanceof Element ? attachKeyFor(ev.target) : null;
+  const files = [...(ev.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+  if (key && files.length) { ev.preventDefault(); addImages(key, files); }
+});
+for (const type of ['dragover', 'dragleave', 'drop']) {
+  document.addEventListener(type, (ev) => {
+    const key = ev.target instanceof Element ? attachKeyFor(ev.target) : null;
+    if (!key || !ev.dataTransfer?.types.includes('Files')) return;
+    ev.preventDefault();
+    const scope = ev.target.closest('.composer, .card, .chat-compose');
+    scope.classList.toggle('drop-on', type === 'dragover');
+    if (type === 'drop') addImages(key, [...ev.dataTransfer.files]);
+  });
+}
+$('#goalAttach').outerHTML = attachUI('goal');
+
 /* ---------- tiny markdown ---------- */
 function inlineMd(s) {
   return esc(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/!\[([^\]]*)\]\(([^)\n]*[\\/]attachments[\\/][^)\n]+)\)/g, (_, alt, p) => {
+      const src = `/api/attachment?path=${encodeURIComponent(p.replace(/&amp;/g, '&'))}`;
+      return `<a class="att" href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="${alt}" loading="lazy"></a>`;
+    })
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
 }
@@ -451,6 +545,20 @@ function md(src) {
     out += `<p>${p.map(inlineMd).join('<br>')}</p>`;
   }
   return out;
+}
+/**
+ * Employees often pass a whole request as one shell argument with no line breaks
+ * ("... 이유: ... 순서: 1) ... 2) ... 답변에 적을 것: ..."). Give such one-liners back their
+ * structure: labels become bold headings, inline steps become a list. Text that already
+ * has line breaks is left as written.
+ */
+function tidy(src) {
+  const s = String(src ?? '').trim();
+  if (s.includes('\n') || s.length < 120) return s;
+  return s
+    .replace(/\s+(이유|순서|방법|할 일|비용|기한|주의|참고|답변에 적을 것|답변 방법)\s*:\s*/g, '\n\n**$1**\n')
+    .replace(/(^|\s)(\d{1,2})\)\s+/g, '\n$2. ')
+    .replace(/\s*([①-⑳])\s*/g, '\n- $1 ');
 }
 
 /* ---------- header ---------- */
@@ -554,10 +662,11 @@ function renderInbox() {
     h += `<div class="card question" data-id="${q.id}" data-item="${q.item ?? ''}">
       <div class="kind">질문${part} <span>· ${q.id} · ${esc(q.assignee)}</span></div>
       <div class="title">${esc(q.title)}</div>
-      <div class="prose">${md(q.question)}</div>
+      <div class="prose">${md(tidy(q.question))}</div>
       ${q.answered !== null && q.answered !== undefined
-        ? `<div class="meta" style="margin-top:8px">✅ 답변함: ${esc(q.answered)} <span class="hint">— 나머지 건에 모두 답하면 직원이 다시 일을 시작합니다</span></div>`
-        : `<textarea placeholder="이 건에 대한 답변. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
+        ? `<div class="meta" style="margin-top:8px">✅ 답변함 <span class="hint">— 나머지 건에 모두 답하면 직원이 다시 일을 시작합니다</span></div><div class="prose">${md(q.answered)}</div>`
+        : `<textarea placeholder="이 건에 대한 답변. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요. 이미지는 붙여 넣거나 끌어다 놓아도 됩니다."></textarea>
+      ${attachUI(`q:${q.id}:${q.item ?? ''}`)}
       <div class="actions"><button class="btn primary" data-act="answer">답변 보내기</button>
         <span style="flex:1"></span><button class="btn small" data-open="${q.id}">자세히</button></div>`}</div>`;
   }
@@ -579,9 +688,12 @@ $('#inbox').addEventListener('click', (ev) => {
   if (b.dataset.act === 'approve') act(id, 'approve', { note: text }, '승인했습니다');
   if (b.dataset.act === 'deny') { if (!text) return toast('반려 사유를 적어 주세요', true); act(id, 'deny', { reason: text }, '반려했습니다'); }
   if (b.dataset.act === 'answer') {
-    if (!text) return toast('답변을 적어 주세요', true);
+    const key = `q:${id}:${card.dataset.item}`;
+    if (uploading(key)) return toast('이미지를 올리는 중입니다', true);
+    const full = withAttachments(text, key);
+    if (!full) return toast('답변을 적어 주세요', true);
     const item = card.dataset.item ? Number(card.dataset.item) : undefined;
-    act(id, 'answer', { text, item }, '답변을 보냈습니다');
+    act(id, 'answer', { text: full, item }, '답변을 보냈습니다').then(() => clearAttachments(key));
   }
   if (b.dataset.act === 'ack') act(id, 'ack', {}, '확인 처리했습니다');
 });
@@ -631,7 +743,7 @@ async function openTask(id) {
     const m = /^- (\S+) \[([^\]]+)\] ([^:\n]+)(?::\s?)?([\s\S]*)$/.exec(e);
     if (!m) return `<div class="entry">${esc(e)}</div>`;
     const body = m[4].split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n').trim();
-    return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(body)}</div>` : ''}</div>`;
+    return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(tidy(body))}</div>` : ''}</div>`;
   }).join('');
   const open = !terminal(t.status);
   $('#dlgBody').innerHTML = `
@@ -662,6 +774,11 @@ async function openTask(id) {
     body.querySelectorAll('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== b.dataset.tab));
   });
   body.querySelectorAll('[data-file]').forEach((b) => b.onclick = async () => {
+    if (/\.(png|jpe?g|gif|webp|svg)$/i.test(b.dataset.file)) {
+      const src = `/api/task/${id}/file?raw=1&path=${encodeURIComponent(b.dataset.file)}`;
+      $('#fileView').innerHTML = `<a href="${src}" target="_blank" rel="noopener"><img class="out-img" src="${src}" alt="${esc(b.dataset.file)}"></a>`;
+      return;
+    }
     try {
       const f = await api(`/api/task/${id}/file?path=${encodeURIComponent(b.dataset.file)}`);
       $('#fileView').innerHTML = /\.(md|txt)$/i.test(b.dataset.file) ? md(f.text) : `<pre>${esc(f.text)}</pre>`;
@@ -680,11 +797,12 @@ async function openTask(id) {
 
 /* ---------- goal composer ---------- */
 $('#goalSubmit').onclick = async () => {
-  const text = $('#goalText').value.trim();
-  if (!text) return toast('목표 내용을 적어 주세요', true);
+  const typed = $('#goalText').value.trim();
+  if (!typed) return toast('목표 내용을 적어 주세요', true);
+  if (uploading('goal')) return toast('이미지를 올리는 중입니다', true);
   try {
-    const r = await api('/api/goal', { text, workspace: $('#goalWorkspace').value, project: $('#goalProject').value.trim() });
-    $('#goalText').value = ''; toast(`목표 ${r.id} 를 등록했습니다`); refresh();
+    const r = await api('/api/goal', { text: withAttachments(typed, 'goal'), workspace: $('#goalWorkspace').value, project: $('#goalProject').value.trim() });
+    $('#goalText').value = ''; clearAttachments('goal'); toast(`목표 ${r.id} 를 등록했습니다`); refresh();
   } catch (e) { toast(e.message, true); }
 };
 $('#goalText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#goalSubmit').click(); });
@@ -918,15 +1036,16 @@ async function openConv(id, keepScroll) {
       ${meeting ? `<div class="agenda">안건: ${esc(conv.agenda)} · 진행 ${esc(conv.facilitator)}</div>` : ''}</div>
     <div class="msgs">${body || '<div class="chat-empty">아직 메시지가 없습니다</div>'}</div>
     <div class="typing">${typing}</div>
-    <div class="chat-compose"><textarea placeholder="${esc(placeholder)}" ${meeting && conv.status !== 'open' ? 'disabled' : ''}></textarea>
+    <div class="chat-compose">${meeting && conv.status !== 'open' ? '' : attachUI(`c:${id}`)}<textarea placeholder="${esc(placeholder)}" ${meeting && conv.status !== 'open' ? 'disabled' : ''}></textarea>
       <button class="btn primary" id="sendBtn" ${meeting && conv.status !== 'open' ? 'disabled' : ''}>보내기</button></div>`;
   const ta = document.querySelector('#chatMain textarea');
   if (!switching) ta.value = draft;
   const box = document.querySelector('#chatMain .msgs');
   if (switching || nearBottom || !keepScroll) box.scrollTop = box.scrollHeight;
   const send = async () => {
-    const text = ta.value.trim(); if (!text) return;
-    try { await api(`/api/chat/${id}/post`, { text }); ta.value = ''; await openConv(id); loadChatList(); } catch (e) { toast(e.message, true); }
+    if (uploading(`c:${id}`)) return toast('이미지를 올리는 중입니다', true);
+    const text = withAttachments(ta.value.trim(), `c:${id}`); if (!text) return;
+    try { await api(`/api/chat/${id}/post`, { text }); ta.value = ''; clearAttachments(`c:${id}`); await openConv(id); loadChatList(); } catch (e) { toast(e.message, true); }
   };
   $('#sendBtn').onclick = send;
   ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
