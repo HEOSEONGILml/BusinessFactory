@@ -6,6 +6,7 @@ import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, normalizeId, STA
 import type { Status, Task } from './board.ts';
 import { initCompany } from './company.ts';
 import { loadConfig } from './config.ts';
+import type { Config } from './config.ts';
 import { Engine } from './engine.ts';
 import { addMemory, listMemory, readMemory } from './memory.ts';
 import { listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
@@ -16,6 +17,7 @@ import { startWeb, statusLabel } from './web.ts';
 import { clearPassword, setPassword } from './webauth.ts';
 import { spawn } from 'node:child_process';
 import { resolvePaths } from './paths.ts';
+import type { Paths } from './paths.ts';
 
 const HELP = `bf — BusinessFactory 업무 보드
 
@@ -26,6 +28,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf status                               회사 현황
   bf agents                               직원 목록
   bf engine [--once]                      엔진 실행 (--once: 할 일이 없어질 때까지만)
+  bf engine-check                         엔진이 살아 있는지 확인 (0: 정상, 1: 꺼짐, 2: 멈춤)
   bf inbox                                결재·질문·완료 보고 모음
   bf approve <id> [--note "<메모>"]        결재 승인 (채용 포함)
   bf deny <id> "<사유>"                    결재 반려
@@ -298,6 +301,9 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
       return 0;
     }
 
+    case 'engine-check':
+      return engineCheck(paths, config, io);
+
     default:
       io.err(`알 수 없는 명령: ${cmd}\n\n${HELP}`);
       return 2;
@@ -557,6 +563,33 @@ function parsePriority(raw: string | undefined): number {
   const n = Number(raw);
   if (!Number.isInteger(n)) throw new BoardError(`우선순위는 정수여야 합니다: ${raw}`);
   return n;
+}
+
+/**
+ * Watchdog probe for an outside scheduler (systemd timer): is the engine process alive and is
+ * its loop still beating? Exit 0 healthy, 1 not running, 2 running but hung.
+ */
+function engineCheck(paths: Paths, config: Config, io: Io): number {
+  const pidFile = path.join(paths.company, '.engine', 'pid');
+  const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf8') : NaN);
+  if (!pid || !isAlive(pid)) {
+    io.out('엔진: 실행 중이 아님');
+    return 1;
+  }
+  let beat: { pid?: number; at?: string; enabled?: boolean; halted?: string | null } = {};
+  try {
+    beat = JSON.parse(fs.readFileSync(path.join(paths.company, '.engine-heartbeat.json'), 'utf8'));
+  } catch {
+    // no beat yet
+  }
+  const age = beat.pid === pid && beat.at ? (Date.now() - Date.parse(beat.at)) / 1000 : Infinity;
+  if (!(age <= config.watchdog.stale_seconds)) {
+    io.out(`엔진: 응답 없음 (pid ${pid}, 마지막 신호 ${Number.isFinite(age) ? `${Math.round(age)}초 전` : '없음'})`);
+    return 2;
+  }
+  const state = beat.halted ? `정지 (${firstLine(beat.halted)})` : beat.enabled ? '가동' : '꺼짐';
+  io.out(`엔진: 정상 (pid ${pid}, ${state}, 마지막 신호 ${Math.round(age)}초 전)`);
+  return 0;
 }
 
 function firstLine(text: string): string {

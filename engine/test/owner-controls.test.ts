@@ -122,3 +122,90 @@ describe('직원 편집', () => {
     assert.ok(!listAgents(paths).some((a) => a.name === 'worker'));
   });
 });
+
+describe('엔진 감시', () => {
+  it('정지된 엔진은 정해진 시간이 지나면 스스로 다시 가동하고, 연속이면 더 오래 기다린다', async () => {
+    const { board, root } = makeBoard();
+    board.createTask('owner', { title: '목표', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null });
+    const paths = resolvePaths({ BF_ROOT: root });
+    let clock = new Date('2026-10-08T00:00:00Z');
+    const notices: string[] = [];
+    let runs = 0;
+    const engine = new Engine(paths, { ...DEFAULT_CONFIG, claude_command: [process.execPath, FAKE] }, {
+      log: () => {},
+      notify: (n) => notices.push(n.title),
+      now: () => clock,
+      run: (spec) => {
+        runs++;
+        return runAgent(spec, { ...process.env, FAKE_PLAN: JSON.stringify({ ceo: 'auth' }) });
+      },
+    });
+    const haltOnce = async () => {
+      engine.tick();
+      await engine.drain();
+      assert.match(engine.halted ?? '', /인증 오류/);
+    };
+    const later = (min: number) => (clock = new Date(clock.getTime() + min * 60_000));
+
+    engine.recover();
+    await haltOnce();
+    later(9);
+    engine.tick();
+    assert.equal(runs, 1, '10분 전에는 멈춰 있다');
+    later(1);
+    await haltOnce();
+    assert.equal(runs, 2, '10분 뒤 다시 가동해 일을 시작한다');
+    assert.ok(notices.includes('엔진 자동 재가동'));
+
+    later(10);
+    engine.tick();
+    assert.equal(runs, 2, '두 번째는 20분을 기다린다');
+    later(10);
+    await haltOnce();
+    assert.equal(runs, 3);
+  });
+
+  it('auto_resume_minutes 가 0이면 사용자를 기다린다', async () => {
+    const { board, root } = makeBoard();
+    board.createTask('owner', { title: '목표', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null });
+    const paths = resolvePaths({ BF_ROOT: root });
+    let clock = new Date('2026-10-08T00:00:00Z');
+    const config = { ...DEFAULT_CONFIG, claude_command: [process.execPath, FAKE], watchdog: { auto_resume_minutes: 0, stale_seconds: 120 } };
+    const engine = new Engine(paths, config, {
+      log: () => {},
+      notify: () => {},
+      now: () => clock,
+      run: (spec) => runAgent(spec, { ...process.env, FAKE_PLAN: JSON.stringify({ ceo: 'auth' }) }),
+    });
+    await engine.runUntilIdle();
+    clock = new Date(clock.getTime() + 24 * 3_600_000);
+    engine.tick();
+    assert.ok(engine.halted);
+    assert.equal(engine.runningCount, 0);
+  });
+
+  it('engine-check 는 프로세스와 심장 박동으로 상태를 판단한다', () => {
+    const root = makeRoot();
+    const company = path.join(root, 'company');
+    const check = () => {
+      const out: string[] = [];
+      const code = main(['engine-check'], { BF_ROOT: root }, { out: (s) => out.push(s), err: (s) => out.push(s) });
+      return { code, out: out.join('\n') };
+    };
+    assert.equal(check().code, 1, '실행 중이 아니면 1');
+
+    fs.mkdirSync(path.join(company, '.engine'), { recursive: true });
+    fs.writeFileSync(path.join(company, '.engine', 'pid'), String(process.pid));
+    const beat = (at: Date, halted: string | null = null) =>
+      fs.writeFileSync(path.join(company, '.engine-heartbeat.json'), JSON.stringify({ pid: process.pid, at: at.toISOString(), enabled: true, halted }));
+    assert.equal(check().code, 2, '박동이 없으면 멈춘 것');
+    beat(new Date(Date.now() - 600_000));
+    assert.equal(check().code, 2, '오래된 박동은 멈춘 것');
+    beat(new Date());
+    assert.match(check().out, /정상.*가동/);
+    beat(new Date(), '인증 오류');
+    const halted = check();
+    assert.equal(halted.code, 0, '정지(halt)는 엔진 스스로 재가동한다');
+    assert.match(halted.out, /정지 \(인증 오류\)/);
+  });
+});

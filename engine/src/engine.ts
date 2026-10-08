@@ -97,6 +97,9 @@ export class Engine {
   private readonly missingAgent = new Set<string>();
   private pausedUntil: Date | null = null;
   private haltReason: string | null = null;
+  private haltedAt: Date | null = null;
+  /** Halts resumed by the watchdog in a row; each one waits twice as long. Reset by the owner. */
+  private autoResumes = 0;
   private systemSnapshot: string | null = null;
   private readonly notify: Sender;
   private readonly ownerNotifier: OwnerNotifier;
@@ -134,6 +137,7 @@ export class Engine {
     if (on) {
       if (this.haltReason) this.log('정지 원인을 확인했다는 사용자 조치로 다시 가동');
       this.haltReason = null;
+      this.autoResumes = 0;
       this.recover();
       this.log('엔진 가동');
     } else {
@@ -183,7 +187,7 @@ export class Engine {
 
   /** One scheduling pass: register due recurring goals, then launch whatever fits in the free slots. */
   tick(): void {
-    if (this.haltReason) return;
+    if (this.haltReason && !this.autoResume()) return;
     this.notifyOwner();
     if (!this.enabled) return;
     this.fireSchedules();
@@ -230,6 +234,7 @@ export class Engine {
     // Keeps running while switched off or halted, so the web console can turn it back on.
     while (!signal.aborted) {
       this.tick();
+      this.heartbeat();
       await sleep(this.config.poll_seconds * 1000, signal);
     }
     if (this.active.size > 0) this.log(`진행 중인 실행 ${this.active.size}건이 끝나기를 기다립니다...`);
@@ -771,8 +776,40 @@ export class Engine {
 
   private halt(reason: string): void {
     this.haltReason = reason;
+    this.haltedAt = this.now();
     this.log(`!!! ${reason}`);
     this.notify({ title: '엔진 정지 — 확인 필요', body: reason.slice(0, 300) });
+  }
+
+  /**
+   * Watchdog: once a halt has waited auto_resume_minutes (doubling for each resume in a row,
+   * capped at 6 hours), switch back on by itself. Returns true when it resumed.
+   */
+  private autoResume(): boolean {
+    const base = this.config.watchdog.auto_resume_minutes;
+    if (!base || !this.haltedAt || this.runningCount > 0) return false;
+    const waitMinutes = Math.min(base * 2 ** this.autoResumes, 360);
+    if (this.now().getTime() - this.haltedAt.getTime() < waitMinutes * 60_000) return false;
+    const reason = this.haltReason;
+    this.haltReason = null;
+    this.haltedAt = null;
+    this.autoResumes++;
+    this.recover();
+    this.log(`감시: 정지 ${waitMinutes}분 경과, 자동으로 다시 가동 (연속 ${this.autoResumes}회째)`);
+    this.notify({ title: '엔진 자동 재가동', body: `정지 원인: ${(reason ?? '').slice(0, 250)}` });
+    return true;
+  }
+
+  /** Liveness for `bf engine-check`: the loop rewrites this every pass, even while off or halted. */
+  private heartbeat(): void {
+    try {
+      writeFileAtomic(
+        path.join(this.paths.company, '.engine-heartbeat.json'),
+        JSON.stringify({ pid: process.pid, at: this.now().toISOString(), enabled: this.enabled, halted: this.haltReason }),
+      );
+    } catch {
+      // a missed beat only matters if it keeps happening
+    }
   }
 
   /** Announce anything newly waiting on the owner (approvals, questions, finished goals). */

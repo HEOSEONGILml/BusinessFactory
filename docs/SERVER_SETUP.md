@@ -106,6 +106,43 @@ journalctl -u businessfactory -f     # 로그 보기
 - `KillSignal=SIGINT` 와 `TimeoutStopSec=600`: 서비스를 멈출 때 진행 중인 직원 실행이 끝날 때까지 기다린다.
 - 엔진의 켜짐/꺼짐은 웹 화면 버튼으로 바꾼다. 마지막 상태를 기억한다.
 
+### 엔진 감시 (자동 재가동)
+
+엔진이 멈추면 두 단계로 다시 가동한다.
+
+- **안전장치 정지**(시스템 영역 변경, 인증 오류 등): 엔진이 `watchdog.auto_resume_minutes`(기본 10분) 뒤에 스스로 다시 가동하고 휴대폰으로 알린다. 연속으로 멈추면 20분, 40분… 으로 늘려 최대 6시간까지 기다린다. 웹 화면에서 직접 켜면 이 간격이 처음으로 돌아간다. 자동 재가동을 끄려면 `company/config.yaml` 에 `watchdog: { auto_resume_minutes: 0 }` 을 넣는다.
+- **프로세스가 죽거나 응답이 없을 때**: 아래 타이머가 2분마다 `bf engine-check` 로 확인하고 서비스를 다시 시작한다. 엔진은 몇 초마다 `company/.engine-heartbeat.json` 을 갱신한다. `watchdog.stale_seconds`(기본 120초) 넘게 갱신이 없으면 멈춘 것으로 본다.
+
+웹 화면의 "꺼짐" 버튼으로 끈 상태는 사용자의 선택이므로 다시 켜지 않는다.
+
+```bash
+sudo tee /etc/systemd/system/businessfactory-watchdog.service >/dev/null <<'UNIT'
+[Unit]
+Description=BusinessFactory engine watchdog
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/BusinessFactory/bin/bf-watchdog
+UNIT
+sudo tee /etc/systemd/system/businessfactory-watchdog.timer >/dev/null <<'UNIT'
+[Unit]
+Description=Check the BusinessFactory engine every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now businessfactory-watchdog.timer
+bin/bf engine-check                              # 엔진: 정상 (...)
+journalctl -u businessfactory-watchdog -n 20     # 감시 기록
+```
+
+서비스를 일부러 멈춰 둘 때는 타이머도 함께 멈춘다: `sudo systemctl stop businessfactory-watchdog.timer businessfactory`
+
 ## 7. 웹 화면 접속
 
 웹 화면은 서버의 127.0.0.1:4300 에서만 열린다. **Lightsail 방화벽에서 4300 포트를 절대 열지 않는다.** 로그인 기능이 없기 때문이다. 접속 방법은 아래 둘 중 하나다.
