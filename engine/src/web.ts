@@ -25,6 +25,7 @@ import type { Paths } from './paths.ts';
 import { discardHires, installHires, KNOWN_TOOLS, pendingProposals, readStaff, removeStaff, saveStaff } from './staff.ts';
 import { readUsage } from './usage.ts';
 import { lastActivity, readUsageSnapshot } from './watch.ts';
+import { createWebAuth, LOGIN_PAGE } from './webauth.ts';
 
 /** What the page shows about the engine itself. */
 export interface EngineStatus {
@@ -248,18 +249,26 @@ function readOutput(board: Board, id: string, rel: string): string {
   return fs.readFileSync(full, 'utf8');
 }
 
-async function readJson(req: http.IncomingMessage): Promise<Record<string, any>> {
+async function readBody(req: http.IncomingMessage): Promise<string> {
   let raw = '';
   for await (const chunk of req) {
     raw += chunk;
     if (raw.length > 200_000) throw new BoardError('요청이 너무 큽니다.');
   }
+  return raw;
+}
+
+async function readJson(req: http.IncomingMessage): Promise<Record<string, any>> {
+  const raw = await readBody(req);
   return raw ? JSON.parse(raw) : {};
 }
 
 /**
  * Local web console. Binds to 127.0.0.1 only; every write needs the per-process token
- * embedded in the page, and the Host header must be local (blocks DNS rebinding).
+ * embedded in the page, and the Host header must be local or listed in web.allowed_hosts
+ * (blocks DNS rebinding). Once `bf web-password` sets a password, every request also
+ * needs a login session — required before exposing the console through a proxy such as
+ * `tailscale serve`.
  */
 export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.Server {
   const board = new Board(paths, config);
@@ -267,7 +276,8 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
   const token = randomBytes(24).toString('hex');
   const log = opts.log ?? ((l: string) => console.log(l));
   const engineStatus = opts.engineStatus ?? (() => pidEngineStatus(paths));
-  const allowedHosts = new Set([`127.0.0.1:${opts.port}`, `localhost:${opts.port}`]);
+  const allowedHosts = new Set([`127.0.0.1:${opts.port}`, `localhost:${opts.port}`, ...config.web.allowed_hosts]);
+  const auth = createWebAuth(paths);
 
   const send = (res: http.ServerResponse, code: number, body: unknown, type = 'application/json; charset=utf-8') => {
     res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -288,6 +298,42 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
       if (!allowedHosts.has(req.headers.host ?? '')) return send(res, 403, { error: '허용되지 않은 접속입니다.' });
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
       const parts = url.pathname.split('/').filter(Boolean);
+
+      if (auth.enabled()) {
+        const loginPage = (code: number, error: string, headers: Record<string, string> = {}) => {
+          res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
+          res.end(LOGIN_PAGE.replace('%%ERROR%%', error));
+        };
+        if (url.pathname === '/login' && req.method === 'GET') return loginPage(200, '');
+        if (url.pathname === '/login' && req.method === 'POST') {
+          const password = new URLSearchParams(await readBody(req)).get('password') ?? '';
+          const secure = req.headers['x-forwarded-proto'] === 'https';
+          let cookie: string | null;
+          try {
+            cookie = auth.login(password, secure);
+          } catch (err) {
+            return loginPage(429, (err as Error).message);
+          }
+          if (!cookie) {
+            log('웹: 로그인 실패');
+            return loginPage(401, '암호가 맞지 않습니다.');
+          }
+          log('웹: 로그인');
+          res.writeHead(303, { Location: '/', 'Set-Cookie': cookie, 'Cache-Control': 'no-store' });
+          return res.end();
+        }
+        if (url.pathname === '/logout' && req.method === 'POST') {
+          res.writeHead(303, { Location: '/login', 'Set-Cookie': auth.logout(req), 'Cache-Control': 'no-store' });
+          return res.end();
+        }
+        if (!auth.isLoggedIn(req)) {
+          if (req.method === 'GET' && url.pathname === '/') {
+            res.writeHead(303, { Location: '/login', 'Cache-Control': 'no-store' });
+            return res.end();
+          }
+          return send(res, 401, { error: '로그인이 필요합니다.' });
+        }
+      }
 
       if (req.method === 'GET' && url.pathname === '/') {
         const html = fs.readFileSync(PAGE, 'utf8').replace('%%TOKEN%%', token);

@@ -113,7 +113,28 @@ journalctl -u businessfactory -f     # 로그 보기
 - **VS Code Remote-SSH 로 접속해 있을 때**: 하단 "포트" 탭에서 4300 을 전달(Forward)한다. 그다음 PC 브라우저에서 http://localhost:4300 을 연다.
 - **SSH 터널**: PC에서 `ssh -L 4300:127.0.0.1:4300 ubuntu@<고정IP>` 를 실행한 뒤 http://localhost:4300 을 연다.
 
-휴대폰에서 상시 접속하려면 로그인 기능과 Tailscale 연동을 먼저 만들어야 한다. 아직 구현하지 않았다.
+### 휴대폰·외부에서 접속 (Tailscale)
+
+Tailscale 사설망 안에서만 열리는 HTTPS 주소를 만든다. 인터넷에는 열리지 않는다.
+
+```bash
+cd ~/BusinessFactory
+bin/bf web-password                  # 웹 화면 로그인 암호 (8자 이상). 반드시 먼저 설정한다
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up                    # 화면의 주소를 PC 브라우저에서 열어 로그인
+sudo tailscale serve --bg 4300       # 처음이면 Serve 활성화 주소가 나온다. 브라우저에서 켜고 다시 실행
+sudo tailscale serve status          # https://<서버이름>.<tailnet>.ts.net 주소 확인
+```
+
+`company/config.yaml` 의 `web.allowed_hosts` 에 그 주소의 호스트 이름을 넣고 서비스를 다시 시작한다.
+
+```yaml
+web:
+  allowed_hosts:
+    - <서버이름>.<tailnet>.ts.net
+```
+
+휴대폰과 PC에 Tailscale 앱을 깔고 같은 계정으로 로그인하면 그 주소로 접속된다. 암호를 끄려면 `bin/bf web-password --off`.
 
 ## 8. 첫 목표 다시 등록
 

@@ -410,6 +410,7 @@ async function api(path, body) {
   const res = await fetch(path, body === undefined ? {} : {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BF-Token': TOKEN }, body: JSON.stringify(body),
   });
+  if (res.status === 401) { location.href = '/login'; throw new Error('로그인이 필요합니다.'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || '요청 실패');
   return data;

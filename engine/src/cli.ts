@@ -13,6 +13,7 @@ import { discardHires, installHires, pendingProposals, stageProposals } from './
 import { printUsage } from './usage.ts';
 import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
 import { startWeb, statusLabel } from './web.ts';
+import { clearPassword, setPassword } from './webauth.ts';
 import { spawn } from 'node:child_process';
 import { resolvePaths } from './paths.ts';
 
@@ -32,6 +33,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf usage [--days n]                     사용량 요약 (구독 사용 비율 포함)
   bf watch [<id>]                         직원들의 활동을 실시간으로 보기
   bf web                                  웹 화면을 엔진 꺼진 상태로 켜기 (화면에서 가동)
+  bf web-password [--off]                 웹 화면 로그인 암호 설정 (--off: 해제). 외부 접속 전에 필수
 
 업무
   bf task create --to <직원> --title "<제목>" --done-when "<조건>" [--done-when ...]
@@ -638,6 +640,69 @@ function openBrowser(url: string): void {
   spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
 }
 
+/**
+ * Sets or clears the web console password. Owner only: refused inside an employee run.
+ * Reads the password from a hidden prompt, or from stdin when piped.
+ */
+async function runWebPassword(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const paths = resolvePaths(env);
+  const config = loadConfig(paths);
+  if (env.BF_TASK || (env.BF_ACTOR && env.BF_ACTOR !== config.owner)) {
+    console.error('오류: 웹 화면 암호는 사용자만 바꿀 수 있습니다.');
+    return 1;
+  }
+  if (args.includes('--off')) {
+    console.log(clearPassword(paths) ? '웹 화면 로그인을 껐습니다.' : '설정된 암호가 없습니다.');
+    return 0;
+  }
+  const password = process.stdin.isTTY
+    ? await promptHidden('새 암호: ')
+    : (await new Promise<string>((resolve) => {
+        let raw = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', (c) => (raw += c));
+        process.stdin.on('end', () => resolve(raw));
+      })).split(/\r?\n/)[0];
+  if (process.stdin.isTTY && (await promptHidden('한 번 더: ')) !== password) {
+    console.error('오류: 두 암호가 다릅니다.');
+    return 1;
+  }
+  try {
+    setPassword(paths, password);
+  } catch (e) {
+    console.error(`오류: ${(e as Error).message}`);
+    return 1;
+  }
+  console.log('웹 화면 암호를 설정했습니다. 엔진을 다시 시작하지 않아도 바로 적용됩니다.');
+  return 0;
+}
+
+function promptHidden(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    process.stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    let value = '';
+    const onData = (ch: string) => {
+      for (const c of ch) {
+        if (c === '\r' || c === '\n') {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.off('data', onData);
+          process.stdout.write('\n');
+          return resolve(value);
+        }
+        if (c === '\u0003') process.exit(130);
+        if (c === '\u007f' || c === '\b') value = value.slice(0, -1);
+        else value += c;
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -658,6 +723,8 @@ if (import.meta.main) {
     runEngine(argv.slice(1)).then((code) => (process.exitCode = code));
   } else if (argv[0] === 'web') {
     runEngine(argv.slice(1), process.env, { webOnly: true }).then((code) => (process.exitCode = code));
+  } else if (argv[0] === 'web-password') {
+    runWebPassword(argv.slice(1)).then((code) => (process.exitCode = code));
   } else if (argv[0] === 'watch') {
     const ac = new AbortController();
     process.once('SIGINT', () => ac.abort());

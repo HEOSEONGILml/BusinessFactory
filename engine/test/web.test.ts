@@ -7,6 +7,7 @@ import { Board } from '../src/board.ts';
 import { DEFAULT_CONFIG } from '../src/config.ts';
 import { resolvePaths } from '../src/paths.ts';
 import { lastLogEntry, startWeb } from '../src/web.ts';
+import { setPassword } from '../src/webauth.ts';
 import { makeRoot } from './helpers.ts';
 
 const PORT = 43000 + Math.floor(Math.random() * 1000);
@@ -100,6 +101,63 @@ describe('웹 화면', () => {
     assert.equal(f.text, '# 보고서');
     const bad = await fetch(`${BASE}/api/task/${id}/file?path=${encodeURIComponent('../task.md')}`);
     assert.equal(bad.status, 400);
+  });
+});
+
+describe('웹 화면 로그인', () => {
+  const port = PORT + 1000;
+  const base = `http://127.0.0.1:${port}`;
+  let server: http.Server;
+
+  before(async () => {
+    const paths = resolvePaths({ BF_ROOT: makeRoot() });
+    setPassword(paths, 'correct horse');
+    const config = { ...DEFAULT_CONFIG, web: { ...DEFAULT_CONFIG.web, allowed_hosts: ['bf.example.ts.net'] } };
+    server = startWeb(paths, config, { port, log: () => {} });
+    await new Promise((r) => server.once('listening', r));
+  });
+  after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+
+  const login = (password: string) =>
+    fetch(`${base}/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password }),
+    });
+
+  it('암호가 있으면 로그인 전에는 페이지와 API를 막는다', async () => {
+    const page = await fetch(base, { redirect: 'manual' });
+    assert.equal(page.status, 303);
+    assert.equal(page.headers.get('location'), '/login');
+    assert.equal((await fetch(`${base}/api/state`)).status, 401);
+    assert.equal((await fetch(`${base}/login`)).status, 200);
+  });
+
+  it('틀린 암호는 거부하고, 맞는 암호면 세션 쿠키로 들어간다', async () => {
+    assert.equal((await login('wrong password')).status, 401);
+    const ok = await login('correct horse');
+    assert.equal(ok.status, 303);
+    const cookie = (ok.headers.get('set-cookie') ?? '').split(';')[0];
+    assert.match(cookie, /^bf_session=[0-9a-f]{64}$/);
+    assert.equal((await fetch(`${base}/api/state`, { headers: { Cookie: cookie } })).status, 200);
+    assert.equal((await fetch(`${base}/api/state`, { headers: { Cookie: 'bf_session=forged' } })).status, 401);
+  });
+
+  it('allowed_hosts에 넣은 이름은 Host 헤더로 받는다', async () => {
+    const http = await import('node:http');
+    const status = (host: string) =>
+      new Promise<number>((resolve) => {
+        http.get({ host: '127.0.0.1', port, path: '/login', headers: { Host: host } }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+      });
+    assert.equal(await status('bf.example.ts.net'), 200);
+    assert.equal(await status('evil.example'), 403);
   });
 });
 

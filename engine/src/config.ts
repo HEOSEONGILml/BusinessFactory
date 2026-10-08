@@ -40,8 +40,11 @@ export interface Config {
     /** In a meeting, agent turns allowed per participant before the owner must speak again. */
     meeting_turns_per_participant: number;
   };
-  /** Local web console started with the engine. */
-  web: { enabled: boolean; port: number; open_browser: boolean };
+  /**
+   * Local web console started with the engine. allowed_hosts: extra Host headers accepted
+   * besides localhost (e.g. a Tailscale name), as "host" or "host:port".
+   */
+  web: { enabled: boolean; port: number; open_browser: boolean; allowed_hosts: string[] };
   /** How the owner is told that something needs them. */
   notify: NotifyConfig;
   /** Command that starts Claude Code; extra elements are leading arguments. */
@@ -62,7 +65,7 @@ export const DEFAULT_CONFIG: Config = {
   project_priority: {},
   notify: DEFAULT_NOTIFY,
   usage_ceiling: { five_hour: 0.9, seven_day: 0.9 },
-  web: { enabled: true, port: 4300, open_browser: true },
+  web: { enabled: true, port: 4300, open_browser: true, allowed_hosts: [] },
   chat: { max_concurrency: 2, max_chain: 3, max_turns: 12, timeout_minutes: 5, meeting_turns_per_participant: 2 },
   claude_command: ['claude'],
 };
