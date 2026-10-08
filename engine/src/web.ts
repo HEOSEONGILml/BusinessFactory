@@ -22,7 +22,7 @@ import {
   readMessages,
 } from './chat.ts';
 import type { Paths } from './paths.ts';
-import { discardHires, installHires, pendingProposals } from './staff.ts';
+import { discardHires, installHires, KNOWN_TOOLS, pendingProposals, readStaff, removeStaff, saveStaff } from './staff.ts';
 import { readUsage } from './usage.ts';
 import { lastActivity, readUsageSnapshot } from './watch.ts';
 
@@ -31,6 +31,9 @@ export interface EngineStatus {
   running: boolean;
   pausedUntil: string | null;
   halted: string | null;
+  /** The on/off switch, and whether runs are still finishing after switching off. */
+  enabled?: boolean;
+  stopping?: boolean;
   /** Runs in progress; only known when the console runs inside the engine. */
   active?: { taskId: string; kind: 'work' | 'review' | 'chat'; agent: string; startedAt: string; title?: string; activity?: string | null }[];
 }
@@ -76,6 +79,8 @@ export interface WebOptions {
   port: number;
   /** Live engine status when the server runs inside the engine; otherwise read from the pid file. */
   engineStatus?: () => EngineStatus;
+  /** Engine switch for the console's start/stop button. */
+  control?: { start(): void; stop(): void };
   log?: (line: string) => void;
 }
 
@@ -140,7 +145,19 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
     }));
   const questions = tasks
     .filter((t) => t.status === 'blocked' && !t.approval && t.ask_to === owner)
-    .map((t) => ({ id: t.id, assignee: t.assignee, title: t.title, question: lastLogEntry(board.readLog(t.id), '질문') }));
+    .flatMap((t): { id: string; item: number | null; total: number; answered: string | null; assignee: string; title: string; question: string }[] =>
+      t.questions?.length
+        ? t.questions.map((q) => ({
+            id: t.id,
+            item: q.id,
+            total: t.questions!.length,
+            answered: q.answer,
+            assignee: t.assignee,
+            title: t.title,
+            question: q.text,
+          }))
+        : [{ id: t.id, item: null, total: 1, answered: null, assignee: t.assignee, title: t.title, question: lastLogEntry(board.readLog(t.id), '질문') }],
+    );
   const finished = tasks
     .filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && t.status !== 'canceled')
     .map((t) => ({ id: t.id, title: t.title, status: t.status, label: statusLabel(t) }));
@@ -260,7 +277,7 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
   const actions: Record<string, (id: string, b: Record<string, any>) => unknown> = {
     approve: (id, b) => board.approve(owner, id, String(b.note ?? ''), (names) => installHires(paths, names)),
     deny: (id, b) => board.deny(owner, id, String(b.reason ?? ''), (names) => discardHires(paths, names)),
-    answer: (id, b) => board.answer(owner, id, String(b.text ?? '')),
+    answer: (id, b) => board.answer(owner, id, String(b.text ?? ''), Number.isInteger(b.item) ? b.item : undefined),
     ack: (id) => board.acknowledge(owner, id),
     cancel: (id, b) => board.cancel(owner, id, String(b.reason ?? '')),
     comment: (id, b) => board.comment(owner, id, String(b.text ?? '')),
@@ -283,6 +300,19 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
         const id = normalizeId(parts[2]);
         if (parts[3] === 'file') return send(res, 200, { text: readOutput(board, id, url.searchParams.get('path') ?? '') });
         return send(res, 200, taskDetail(board, id));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/staff') {
+        const tasks = board.list();
+        return send(res, 200, {
+          tools: KNOWN_TOOLS,
+          protected: [config.ceo, config.reviewer],
+          staff: listAgents(paths).map((a) => ({
+            ...readStaff(paths, a.name),
+            file: undefined,
+            open: tasks.filter((t) => t.assignee === a.name && !isTerminal(t.status)).length,
+            done: tasks.filter((t) => t.assignee === a.name && t.status === 'done').length,
+          })),
+        });
       }
       if (req.method === 'GET' && url.pathname === '/api/chat') {
         return send(res, 200, { convs: chatList(board, paths), agents: listAgents(paths).map((a) => a.name) });
@@ -316,6 +346,35 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
           return send(res, 200, { id: t.id });
         }
         const names = listAgents(paths).map((a) => a.name);
+        if (url.pathname === '/api/engine/start' || url.pathname === '/api/engine/stop') {
+          if (!opts.control) throw new BoardError('이 화면에서는 엔진을 제어할 수 없습니다.');
+          if (url.pathname.endsWith('start')) opts.control.start();
+          else opts.control.stop();
+          return send(res, 200, { ok: true });
+        }
+        if (url.pathname === '/api/staff/save') {
+          saveStaff(
+            paths,
+            {
+              name: String(body.name ?? ''),
+              description: String(body.description ?? ''),
+              model: body.model ? String(body.model) : null,
+              tools: Array.isArray(body.tools) ? body.tools.map(String) : [],
+              permissions: Array.isArray(body.permissions) ? body.permissions.map(String) : [],
+              prompt: String(body.prompt ?? ''),
+            },
+            body.create === true,
+          );
+          log(`웹: 직원 ${body.create ? '추가' : '수정'} ${body.name}`);
+          return send(res, 200, { ok: true });
+        }
+        if (url.pathname === '/api/staff/delete') {
+          const name = String(body.name ?? '');
+          const open = board.list().filter((t) => t.assignee === name && !isTerminal(t.status)).length;
+          removeStaff(paths, name, [config.ceo, config.reviewer], open);
+          log(`웹: 직원 내보냄 ${name}`);
+          return send(res, 200, { ok: true });
+        }
         if (url.pathname === '/api/chat/dm') {
           if (!names.includes(String(body.agent))) throw new BoardError('없는 직원입니다.');
           return send(res, 200, { id: ensureDm(paths, owner, String(body.agent)).id });

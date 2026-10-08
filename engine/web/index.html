@@ -210,6 +210,24 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .prose li { margin: 3px 0; }
 .card .prose { font-size: 15px; line-height: 1.7; }
 
+/* ---------- engine switch ---------- */
+.engine-ctl { display: flex; gap: 8px; align-items: center; }
+
+/* ---------- staff editor ---------- */
+.staff { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .staff { grid-template-columns: 1fr; } }
+.staff-item { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+.staff-item:hover { background: var(--bg); }
+.staff-item.on { background: var(--accent-soft); }
+.staff-item .avatar { width: 40px; height: 40px; font-size: 20px; border-width: 2px; }
+.form-row { margin-bottom: 16px; }
+.form-row > label { display: block; font-weight: 800; font-size: 14.5px; margin-bottom: 6px; }
+.form-row .hint { display: block; margin-top: 4px; }
+.toolpick { display: flex; flex-wrap: wrap; gap: 8px; }
+.toolpick label { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line-strong); border-radius: 8px; padding: 5px 10px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.toolpick label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+textarea.field.mono { font-family: var(--mono); font-size: 13.5px; }
+
 /* ---------- top tabs ---------- */
 nav.views { display: flex; gap: 4px; }
 nav.views button { border: none; background: none; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 15px; color: var(--muted); cursor: pointer; }
@@ -271,8 +289,8 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
 <body>
 <header>
   <div class="brand">BusinessFactory<small id="company"></small></div>
-  <span id="engine" class="pill idle">확인 중</span>
-  <nav class="views"><button data-view="dash" class="on">대시보드</button><button data-view="chat">메신저</button></nav>
+  <div class="engine-ctl"><span id="engine" class="pill idle">확인 중</span><button class="btn small" id="engineBtn" hidden></button></div>
+  <nav class="views"><button data-view="dash" class="on">대시보드</button><button data-view="chat">메신저</button><button data-view="staff">직원</button></nav>
   <div class="meters" id="meters"></div>
 </header>
 
@@ -320,6 +338,19 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
     <section class="panel feed-col">
       <h2>실시간 활동 <span class="spacer"></span><span id="feedState" class="sub"></span></h2>
       <div class="feed" id="feed"></div>
+    </section>
+  </div>
+ </div>
+
+ <div id="viewStaff" hidden>
+  <div class="staff">
+    <section class="panel">
+      <h2>직원 <span class="spacer"></span><button class="btn small primary" id="staffNew">+ 새 직원</button></h2>
+      <div class="panel-body" id="staffList" style="padding:8px"></div>
+    </section>
+    <section class="panel">
+      <h2 id="staffTitle">직원을 고르세요</h2>
+      <div class="panel-body" id="staffForm"></div>
     </section>
   </div>
  </div>
@@ -424,11 +455,17 @@ function md(src) {
 /* ---------- header ---------- */
 function renderHeader() {
   $('#company').textContent = state.company ? `· ${state.company}` : '';
-  const e = state.engine, el = $('#engine');
-  if (e.halted) { el.className = 'pill bad'; el.textContent = '엔진 정지 — 확인 필요'; el.title = e.halted; }
-  else if (!e.running) { el.className = 'pill idle'; el.textContent = '엔진 꺼짐'; el.title = 'npm start 로 켜세요'; }
-  else if (e.pausedUntil) { el.className = 'pill warn'; el.textContent = `휴식 중 · ${new Date(e.pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}까지`; el.title = '사용량 한도'; }
-  else { el.className = 'pill ok'; el.textContent = '가동 중'; el.title = ''; }
+  const e = state.engine, el = $('#engine'), btn = $('#engineBtn');
+  const busy = (e.active ?? []).length;
+  let action = null;
+  if (!e.running) { el.className = 'pill idle'; el.textContent = '엔진 꺼짐'; el.title = 'npm start 로 켜세요'; }
+  else if (e.halted) { el.className = 'pill bad'; el.textContent = '엔진 멈춤 — 확인 필요'; el.title = e.halted; action = ['start', '확인했음, 다시 가동']; }
+  else if (e.enabled === false && e.stopping) { el.className = 'pill warn'; el.textContent = `정지 중 · 마무리 ${busy}건`; el.title = ''; action = ['start', '▶ 다시 가동']; }
+  else if (e.enabled === false) { el.className = 'pill idle'; el.textContent = '엔진 꺼짐'; el.title = '직원들이 쉬고 있습니다'; action = ['start', '▶ 엔진 가동']; }
+  else if (e.pausedUntil) { el.className = 'pill warn'; el.textContent = `휴식 중 · ${new Date(e.pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}까지`; el.title = '사용량 한도'; action = ['stop', '⏸ 엔진 정지']; }
+  else { el.className = 'pill ok'; el.textContent = '가동 중'; el.title = ''; action = ['stop', '⏸ 엔진 정지']; }
+  btn.hidden = !action;
+  if (action) { btn.textContent = action[1]; btn.dataset.do = action[0]; btn.className = 'btn small' + (action[0] === 'start' ? ' good' : ''); }
 
   const labels = { five_hour: '5시간 한도', seven_day: '주간 한도' };
   const w = state.usage?.windows ?? {};
@@ -490,7 +527,7 @@ $('#office').addEventListener('click', (ev) => {
 /* ---------- inbox ---------- */
 function renderInbox() {
   const { approvals, questions, finished } = state.inbox;
-  const n = approvals.length + questions.length + finished.length;
+  const n = approvals.length + questions.filter((q) => q.answered === null || q.answered === undefined).length + finished.length;
   const c = $('#inboxCount'); c.hidden = !n; c.textContent = n;
   if (!n) { $('#inbox').innerHTML = '<div class="empty">처리할 일이 없습니다 🎉</div>'; return; }
   let h = '';
@@ -512,13 +549,16 @@ function renderInbox() {
       </div></div>`;
   }
   for (const q of questions) {
-    h += `<div class="card question" data-id="${q.id}">
-      <div class="kind">질문 <span>· ${q.id} · ${esc(q.assignee)}</span></div>
+    const part = q.item ? ` · ${q.item}/${q.total}건` : '';
+    h += `<div class="card question" data-id="${q.id}" data-item="${q.item ?? ''}">
+      <div class="kind">질문${part} <span>· ${q.id} · ${esc(q.assignee)}</span></div>
       <div class="title">${esc(q.title)}</div>
       <div class="prose">${md(q.question)}</div>
-      <textarea placeholder="답변을 적으세요. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
+      ${q.answered !== null && q.answered !== undefined
+        ? `<div class="meta" style="margin-top:8px">✅ 답변함: ${esc(q.answered)} <span class="hint">— 나머지 건에 모두 답하면 직원이 다시 일을 시작합니다</span></div>`
+        : `<textarea placeholder="이 건에 대한 답변. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
       <div class="actions"><button class="btn primary" data-act="answer">답변 보내기</button>
-        <span style="flex:1"></span><button class="btn small" data-open="${q.id}">자세히</button></div></div>`;
+        <span style="flex:1"></span><button class="btn small" data-open="${q.id}">자세히</button></div>`}</div>`;
   }
   for (const f of finished) {
     h += `<div class="card finished" data-id="${f.id}">
@@ -537,7 +577,11 @@ $('#inbox').addEventListener('click', (ev) => {
   const text = card.querySelector('textarea')?.value.trim() ?? '';
   if (b.dataset.act === 'approve') act(id, 'approve', { note: text }, '승인했습니다');
   if (b.dataset.act === 'deny') { if (!text) return toast('반려 사유를 적어 주세요', true); act(id, 'deny', { reason: text }, '반려했습니다'); }
-  if (b.dataset.act === 'answer') { if (!text) return toast('답변을 적어 주세요', true); act(id, 'answer', { text }, '답변을 보냈습니다'); }
+  if (b.dataset.act === 'answer') {
+    if (!text) return toast('답변을 적어 주세요', true);
+    const item = card.dataset.item ? Number(card.dataset.item) : undefined;
+    act(id, 'answer', { text, item }, '답변을 보냈습니다');
+  }
   if (b.dataset.act === 'ack') act(id, 'ack', {}, '확인 처리했습니다');
 });
 
@@ -649,6 +693,12 @@ const feed = $('#feed');
 function addFeed(line) {
   const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
   const m = /^\[([^\]]+)\]\s(.*)$/.exec(line);
+  // Older logs may hold multi-line entries: fold continuation lines into the previous row.
+  if (!m && feed.lastElementChild) {
+    const prev = feed.lastElementChild.querySelector('.msg');
+    if (prev) prev.insertAdjacentText('beforeend', ' ' + line.trim());
+    return;
+  }
   const time = m ? (/(\d{1,2}:\d{2}):\d{2}\s*$/.exec(m[1])?.[1] ?? '') : '';
   let text = (m ? m[2] : line).trim();
   let kind = '', html;
@@ -694,9 +744,77 @@ async function refresh() {
   try {
     state = await api('/api/state');
     renderHeader(); renderOffice(); renderInbox(); renderBoard(); renderSide();
-    const pending = state.inbox.approvals.length + state.inbox.questions.length;
+    const pending = state.inbox.approvals.length + state.inbox.questions.filter((q) => q.answered == null).length;
     document.title = (pending ? `(${pending}) ` : '') + 'BusinessFactory';
   } catch (e) { $('#engine').className = 'pill bad'; $('#engine').textContent = '서버 연결 끊김'; }
+}
+
+/* ---------- engine switch ---------- */
+$('#engineBtn').onclick = async () => {
+  const what = $('#engineBtn').dataset.do;
+  if (what === 'stop' && !confirm('엔진을 멈출까요? 새 일은 시작하지 않고, 하던 일만 마무리합니다.')) return;
+  if (what === 'start' && state.engine.halted && !confirm(`엔진이 이런 이유로 멈췄습니다:\n\n${state.engine.halted}\n\n확인하셨으면 다시 가동합니다.`)) return;
+  try { await api(`/api/engine/${what}`, {}); toast(what === 'start' ? '엔진을 가동했습니다' : '엔진을 멈춥니다'); refresh(); }
+  catch (e) { toast(e.message, true); }
+};
+
+/* ---------- staff editor ---------- */
+let staffData = null, staffSel = null;
+async function loadStaff(select) {
+  try { staffData = await api('/api/staff'); } catch (e) { return toast(e.message, true); }
+  if (select !== undefined) staffSel = select;
+  $('#staffList').innerHTML = staffData.staff.map((s) => {
+    const [e, bg] = avatarOf(s.name);
+    return `<div class="staff-item${s.name === staffSel ? ' on' : ''}" data-name="${esc(s.name)}"><div class="avatar" style="background:${bg}">${e}</div>
+      <div style="min-width:0"><b>${esc(s.name)}</b> <span class="badge">${esc(s.model ?? '기본')}</span>
+      <div class="hint">진행 ${s.open} · 완료 ${s.done}</div></div></div>`;
+  }).join('');
+  if (staffSel === '') renderStaffForm(null);
+  else if (staffSel) renderStaffForm(staffData.staff.find((s) => s.name === staffSel) ?? null);
+}
+$('#staffList').addEventListener('click', (ev) => { const el = ev.target.closest('[data-name]'); if (el) loadStaff(el.dataset.name); });
+$('#staffNew').onclick = () => loadStaff('');
+
+function renderStaffForm(s) {
+  const create = !s;
+  s = s ?? { name: '', description: '', model: 'sonnet', tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'], permissions: [], prompt: '', open: 0, done: 0 };
+  const isProtected = staffData.protected.includes(s.name);
+  $('#staffTitle').textContent = create ? '새 직원' : `${s.name} 설정`;
+  $('#staffForm').innerHTML = `
+    <div class="form-row"><label>이름 (영문 소문자, 하이픈)</label><input class="field" id="sfName" value="${esc(s.name)}" ${create ? '' : 'disabled'} placeholder="예) designer"></div>
+    <div class="form-row"><label>직무 설명 (한 줄)</label><input class="field" id="sfDesc" value="${esc(s.description)}" placeholder="예) 서비스 화면과 로고를 디자인하는 디자이너"></div>
+    <div class="form-row"><label>모델</label>
+      <select class="field" id="sfModel" style="width:auto">${['opus', 'sonnet', 'haiku'].map((m) => `<option ${m === s.model ? 'selected' : ''}>${m}</option>`).join('')}<option value="" ${!s.model ? 'selected' : ''}>기본</option></select>
+      <span class="hint">opus: 판단이 중요한 직무 (사용량 많이 씀) · sonnet: 일반 실무 · haiku: 단순 반복 (가장 적게 씀)</span></div>
+    <div class="form-row"><label>쓸 수 있는 도구</label><div class="toolpick">${staffData.tools.map((t) => `<label><input type="checkbox" value="${t}" ${s.tools.length === 0 || s.tools.includes(t) ? 'checked' : ''}> ${t}</label>`).join('')}</div>
+      <span class="hint">파일 읽기·쓰기는 엔진이 자기 업무 폴더와 작업 공간으로 자동 제한합니다. 셸(Bash)은 bf 명령만 기본 허용됩니다.</span></div>
+    <div class="form-row"><label>추가 권한 (한 줄에 하나)</label><textarea class="field mono" id="sfPerm" style="min-height:80px" placeholder="예)\nBash(npm test:*)\nWebSearch">${esc(s.permissions.join('\n'))}</textarea>
+      <span class="hint">범위 없는 권한(그냥 Bash, Write 등)은 저장할 수 없습니다. 배포·결제 같은 권한은 여기 넣지 말고 그때그때 결재로 주세요.</span></div>
+    <div class="form-row"><label>직무 지침</label><textarea class="field" id="sfPrompt" style="min-height:320px;line-height:1.7">${esc(s.prompt)}</textarea>
+      <span class="hint">이 직원이 일할 때 읽는 지침입니다. 무엇을 책임지는지, 일하는 순서, 품질 기준, 하지 말아야 할 것을 적으세요. 회사 공통 규칙(핸드북)은 따로 붙습니다.</span></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn primary" id="sfSave">${create ? '직원 추가' : '저장'}</button>
+      ${!create ? `<button class="btn danger" id="sfDelete" ${isProtected ? 'disabled title="회사 운영에 꼭 필요한 직원입니다"' : ''}>내보내기</button>` : ''}
+      <span class="hint" style="margin-left:auto">저장하면 다음 실행부터 적용됩니다. 지금 일하는 중인 실행에는 영향이 없습니다.</span>
+    </div>`;
+  $('#sfSave').onclick = async () => {
+    const payload = {
+      create,
+      name: $('#sfName').value.trim(),
+      description: $('#sfDesc').value,
+      model: $('#sfModel').value,
+      tools: [...document.querySelectorAll('#staffForm .toolpick input:checked')].map((i) => i.value),
+      permissions: $('#sfPerm').value.split('\n'),
+      prompt: $('#sfPrompt').value,
+    };
+    try { await api('/api/staff/save', payload); toast(create ? '직원을 추가했습니다' : '저장했습니다'); loadStaff(payload.name); refresh(); }
+    catch (e) { toast(e.message, true); }
+  };
+  if ($('#sfDelete')) $('#sfDelete').onclick = async () => {
+    if (!confirm(`${s.name} 를 내보낼까요? 직원 정의 파일이 삭제됩니다 (회사 git 기록에는 남습니다).`)) return;
+    try { await api('/api/staff/delete', { name: s.name }); toast('내보냈습니다'); loadStaff(null); $('#staffForm').innerHTML = ''; $('#staffTitle').textContent = '직원을 고르세요'; refresh(); }
+    catch (e) { toast(e.message, true); }
+  };
 }
 
 /* ---------- views ---------- */
@@ -704,7 +822,9 @@ function showView(v) {
   document.querySelectorAll('nav.views button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   $('#viewDash').hidden = v !== 'dash';
   $('#viewChat').hidden = v !== 'chat';
+  $('#viewStaff').hidden = v !== 'staff';
   if (v === 'chat') loadChat();
+  if (v === 'staff') loadStaff(staffSel ?? staffData?.staff?.[0]?.name ?? 'ceo');
   try { localStorage.setItem('bf-view', v); } catch {}
 }
 document.querySelectorAll('nav.views button').forEach((b) => (b.onclick = () => showView(b.dataset.view)));
@@ -843,7 +963,7 @@ $('#meetStart').onclick = async () => {
 };
 
 refresh(); connect();
-try { if (localStorage.getItem('bf-view') === 'chat') showView('chat'); } catch {}
+try { const v = localStorage.getItem('bf-view'); if (v === 'chat' || v === 'staff') showView(v); } catch {}
 setInterval(refresh, 5000);
 </script>
 </body>

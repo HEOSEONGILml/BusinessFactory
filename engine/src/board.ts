@@ -69,12 +69,23 @@ export interface Task {
   ask_to: string | null;
   /** Extra permission rules the owner approved for this task only. */
   grants?: string[];
+  /**
+   * Several separate questions asked at once (each answered on its own). The task
+   * resumes when every one has an answer.
+   */
+  questions?: Question[] | null;
   /** Set while the task is blocked on an owner decision. */
   approval?: Approval | null;
   /** Owner has seen the final result (top-level goals). */
   acknowledged?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface Question {
+  id: number;
+  text: string;
+  answer: string | null;
 }
 
 export interface Approval {
@@ -313,16 +324,23 @@ export class Board {
    * Assignee is stuck. The question goes to whoever assigned the task, or straight to the
    * owner (`toOwner`) for things only the owner can do: sign-ups, payments, personal info.
    */
-  ask(actor: string, id: string, question: string, toOwner = false): Task {
+  ask(actor: string, id: string, question: string, toOwner = false, items: string[] = []): Task {
     return this.locked(() => {
       const doc = this.read(id);
       this.requireAssignee(actor, doc.task);
       this.requireStatus(doc.task, 'running');
-      if (!question.trim()) throw new BoardError('질문 내용이 비어 있습니다.');
+      const list = items.map((s) => s.trim()).filter(Boolean);
+      if (!question.trim() && list.length === 0) throw new BoardError('질문 내용이 비어 있습니다.');
       doc.task.ask_to = toOwner ? this.config.owner : doc.task.created_by;
+      doc.task.questions = list.length > 1 ? list.map((text, i) => ({ id: i + 1, text, answer: null })) : null;
       this.transition(doc, 'blocked');
       this.save(doc);
-      this.log(id, actor, '질문', `→ ${doc.task.ask_to}: ${question}`);
+      if (doc.task.questions) {
+        if (question.trim()) this.log(id, actor, '질문', `→ ${doc.task.ask_to}: ${question}`);
+        for (const q of doc.task.questions) this.log(id, actor, `질문 ${q.id}/${list.length}`, `→ ${doc.task.ask_to}: ${q.text}`);
+      } else {
+        this.log(id, actor, '질문', `→ ${doc.task.ask_to}: ${[question.trim(), ...list].filter(Boolean).join('\n\n')}`);
+      }
       // The asker's manager is usually waiting on this very task; wake it up to answer.
       if (doc.task.parent && doc.task.ask_to !== this.config.owner) {
         const parent = this.read(doc.task.parent);
@@ -337,7 +355,8 @@ export class Board {
     });
   }
 
-  answer(actor: string, id: string, text: string): Task {
+  /** Answer the question, or with `item` one of several; the task resumes once all are answered. */
+  answer(actor: string, id: string, text: string, item?: number): Task {
     return this.locked(() => {
       const doc = this.read(id);
       this.requireStatus(doc.task, 'blocked');
@@ -348,6 +367,25 @@ export class Board {
         throw new BoardError(`이 질문은 ${doc.task.ask_to} 에게 온 것입니다.`);
       }
       if (!text.trim()) throw new BoardError('답변 내용이 비어 있습니다.');
+      const qs = doc.task.questions;
+      if (qs?.length) {
+        if (item === undefined) throw new BoardError(`${id} 에는 질문이 ${qs.length}건 있습니다. 몇 번째 질문에 답하는지 정해 주세요 (--item).`);
+        const q = qs.find((x) => x.id === item);
+        if (!q) throw new BoardError(`${id} 에 ${item}번 질문은 없습니다.`);
+        q.answer = text.trim();
+        this.log(id, actor, `답변 ${q.id}/${qs.length}`, text);
+        if (qs.some((x) => x.answer === null)) {
+          this.save(doc);
+          return doc.task;
+        }
+        doc.task.questions = null;
+        doc.task.ask_to = null;
+        doc.task.attempts = 0;
+        this.transition(doc, 'pending');
+        this.save(doc);
+        this.log(id, 'system', '재개', '모든 질문에 답변이 와서 다시 시작');
+        return doc.task;
+      }
       doc.task.ask_to = null;
       doc.task.attempts = 0; // progress: count failed runs afresh
       this.transition(doc, 'pending');

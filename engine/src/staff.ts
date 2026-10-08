@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { listAgents, splitToolList } from './agents.ts';
 import { BoardError, checkGrantRule } from './board.ts';
-import { parseFrontmatter } from './frontmatter.ts';
+import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.ts';
 import { commitCompany } from './git.ts';
 import type { Paths } from './paths.ts';
 
@@ -84,4 +84,78 @@ export function installHires(paths: Paths, names: string[]): void {
 
 export function discardHires(paths: Paths, names: string[]): void {
   for (const name of names) fs.rmSync(path.join(paths.hiring, `${name}.md`), { force: true });
+}
+
+// ---------- owner edits from the web console ----------
+
+/** Tools an employee definition may list (file tools are path-scoped by the engine). */
+export const KNOWN_TOOLS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebSearch', 'WebFetch', 'TodoWrite'];
+const MODEL_RE = /^(opus|sonnet|haiku|fable|claude-[a-z0-9.-]+)$/;
+
+export interface StaffInput {
+  name: string;
+  description: string;
+  model: string | null;
+  tools: string[];
+  permissions: string[];
+  prompt: string;
+}
+
+export function readStaff(paths: Paths, name: string): StaffInput & { file: string } {
+  const agent = listAgents(paths).find((a) => a.name === name);
+  if (!agent) throw new BoardError(`없는 직원입니다: ${name}`);
+  return {
+    name: agent.name,
+    description: agent.description,
+    model: agent.model,
+    tools: agent.tools,
+    permissions: agent.permissions,
+    prompt: agent.prompt,
+    file: agent.file,
+  };
+}
+
+/**
+ * Owner creates or edits an employee. Same safety rules as hiring (no disk-wide permissions),
+ * and the change is committed at once so the engine's roster tripwire stays quiet.
+ */
+export function saveStaff(paths: Paths, input: StaffInput, create: boolean): void {
+  const name = input.name.trim();
+  if (!NAME_RE.test(name)) throw new BoardError(`직원 이름은 영문 소문자로 시작하는 소문자·숫자·하이픈 2~40자여야 합니다: '${name}'`);
+  const exists = listAgents(paths).some((a) => a.name === name);
+  if (create && exists) throw new BoardError(`이미 있는 직원입니다: ${name}`);
+  if (!create && !exists) throw new BoardError(`없는 직원입니다: ${name}`);
+  if (!input.description.trim()) throw new BoardError('직무 설명(한 줄)이 필요합니다.');
+  if (input.prompt.trim().length < 20) throw new BoardError('직무 지침이 너무 짧습니다.');
+  const model = input.model?.trim() || null;
+  if (model && !MODEL_RE.test(model)) throw new BoardError(`알 수 없는 모델: ${model}`);
+  const tools = [...new Set(input.tools.map((t) => t.trim()).filter(Boolean))];
+  const unknown = tools.filter((t) => !KNOWN_TOOLS.includes(t));
+  if (unknown.length) throw new BoardError(`알 수 없는 도구: ${unknown.join(', ')}`);
+  const permissions = [...new Set(input.permissions.map((p) => p.trim()).filter(Boolean))];
+  permissions.forEach(checkGrantRule);
+
+  const front: Record<string, string> = { name, description: input.description.trim().replace(/\n/g, ' ') };
+  if (model) front.model = model;
+  if (tools.length) front.tools = tools.join(', ');
+  if (permissions.length) front.permissions = permissions.join(', ');
+  fs.mkdirSync(paths.agents, { recursive: true });
+  fs.writeFileSync(path.join(paths.agents, `${name}.md`), stringifyFrontmatter(front, input.prompt.trim() + '\n'), 'utf8');
+  validateSaved(paths, name);
+  commitCompany(paths, `${create ? '직원 추가' : '직원 수정'}: ${name} (사용자)`);
+}
+
+function validateSaved(paths: Paths, name: string): void {
+  const a = listAgents(paths).find((x) => x.name === name);
+  if (!a) throw new BoardError('저장한 직원 파일을 다시 읽지 못했습니다.');
+}
+
+/** Owner removes an employee. The CEO and reviewer roles cannot be removed; nor anyone with open work. */
+export function removeStaff(paths: Paths, name: string, protectedNames: string[], openAssignments: number): void {
+  if (protectedNames.includes(name)) throw new BoardError(`${name} 는 회사 운영에 꼭 필요한 직원이라 내보낼 수 없습니다. 설정만 바꿀 수 있습니다.`);
+  if (openAssignments > 0) throw new BoardError(`${name} 에게 아직 끝나지 않은 업무가 ${openAssignments}건 있습니다. 먼저 끝내거나 취소하세요.`);
+  const file = path.join(paths.agents, `${name}.md`);
+  if (!fs.existsSync(file)) throw new BoardError(`없는 직원입니다: ${name}`);
+  fs.rmSync(file);
+  commitCompany(paths, `직원 내보냄: ${name} (사용자)`);
 }

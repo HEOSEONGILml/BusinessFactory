@@ -31,7 +31,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf ack <id>                             완료된 목표 확인 처리
   bf usage [--days n]                     사용량 요약 (구독 사용 비율 포함)
   bf watch [<id>]                         직원들의 활동을 실시간으로 보기
-  bf web                                  웹 화면만 켜기 (엔진은 npm start)
+  bf web                                  웹 화면을 엔진 꺼진 상태로 켜기 (화면에서 가동)
 
 업무
   bf task create --to <직원> --title "<제목>" --done-when "<조건>" [--done-when ...]
@@ -41,7 +41,8 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf task show <id>
   bf task done <id> --summary "<요약>"
   bf task ask <id> [--owner] "<질문>"      (--owner: 사용자에게 직접)
-  bf task answer <id> "<답변>"
+  bf task ask <id> [--owner] --item "<질문1>" --item "<질문2>"   (여러 건을 건별로)
+  bf task answer <id> [--item n] "<답변>"
   bf task pass <id> [--note "<메모>"]
   bf task reject <id> "<사유>"
   bf task comment <id> "<내용>"
@@ -412,17 +413,18 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
       const { values, positionals } = parseArgs({
         args,
         allowPositionals: true,
-        options: { owner: { type: 'boolean' } },
+        options: { owner: { type: 'boolean' }, item: { type: 'string', multiple: true } },
       });
       const [id, ...text] = positionals;
-      const task = board.ask(actor, requireId([id]), text.join(' '), values.owner ?? false);
+      const task = board.ask(actor, requireId([id]), text.join(' '), values.owner ?? false, values.item ?? []);
       io.out(`${task.id} → 질문대기 (답변자: ${task.ask_to}). 지금 실행을 마치세요; 답변이 오면 다시 시작됩니다.`);
       return 0;
     }
 
     case 'answer': {
-      const [id, ...text] = args;
-      const task = board.answer(actor, requireId([id]), text.join(' '));
+      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { item: { type: 'string' } } });
+      const [id, ...text] = positionals;
+      const task = board.answer(actor, requireId([id]), text.join(' '), values.item === undefined ? undefined : Number(values.item));
       io.out(`${task.id} → ${STATUS_LABEL[task.status]}`);
       return 0;
     }
@@ -490,9 +492,17 @@ function printInbox(board: Board, io: Io): void {
   if (questions.length) {
     io.out('■ 질문  (bf task answer <id> "<답변>")');
     for (const t of questions) {
-      const asked = board.readLog(t.id).split('\n').filter((l) => l.includes('] 질문:')).pop() ?? '';
       io.out(`  ${t.id} [${t.assignee}] ${t.title}`);
-      io.out(`      ${asked.replace(/^- \S+ /, '')}`);
+      if (t.questions?.length) {
+        for (const q of t.questions) {
+          const head = q.text.split('\n')[0];
+          io.out(`      ${q.id}/${t.questions.length} ${q.answer === null ? head : `✅ ${head} — 답변: ${q.answer}`}`);
+        }
+        io.out(`      → bf task answer ${Number(t.id.slice(1))} --item <번호> "<답변>"   (전문: bf task show ${Number(t.id.slice(1))})`);
+      } else {
+        const asked = board.readLog(t.id).split('\n').filter((l) => l.includes('] 질문:')).pop() ?? '';
+        io.out(`      ${asked.replace(/^- \S+ /, '')}`);
+      }
     }
   }
   if (finished.length) {
@@ -553,7 +563,11 @@ function firstLine(text: string): string {
 }
 
 /** `bf engine`: the long-running scheduler. Only one may run per company. */
-export async function runEngine(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
+/**
+ * `bf engine` / `npm start`: the engine plus the web console in one process. Only one per company.
+ * `bf web` is the same process starting with the engine switched off.
+ */
+export async function runEngine(argv: string[], env: NodeJS.ProcessEnv = process.env, opts: { webOnly?: boolean } = {}): Promise<number> {
   const { values } = parseArgs({ args: argv, options: { once: { type: 'boolean' } } });
   const paths = resolvePaths(env);
   if (!fs.existsSync(paths.board)) {
@@ -567,22 +581,32 @@ export async function runEngine(argv: string[], env: NodeJS.ProcessEnv = process
   } catch {
     const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf8') : NaN);
     if (pid && isAlive(pid)) {
-      console.error(`엔진이 이미 실행 중입니다 (pid ${pid}).`);
+      console.error(`이미 실행 중입니다 (pid ${pid}). 웹 화면: http://127.0.0.1:${loadConfig(paths).web.port}`);
       return 1;
     }
   }
   fs.writeFileSync(pidFile, String(process.pid));
   const config = loadConfig(paths);
-  const engine = new Engine(paths, config);
+  const stateFile = path.join(paths.company, '.engine-state.json');
+  let remembered = true;
+  try {
+    remembered = JSON.parse(fs.readFileSync(stateFile, 'utf8')).enabled !== false;
+  } catch {
+    // first start: on
+  }
+  const engine = new Engine(paths, config, { startEnabled: values.once ? true : opts.webOnly ? false : remembered });
   const web = config.web.enabled && !values.once
     ? startWeb(paths, config, {
         port: config.web.port,
         engineStatus: () => ({
           running: true,
+          enabled: engine.isEnabled,
+          stopping: !engine.isEnabled && engine.runningCount > 0,
           pausedUntil: engine.pausedUntilTime?.toISOString() ?? null,
           halted: engine.halted,
           active: engine.activeRuns(),
         }),
+        control: { start: () => engine.setEnabled(true), stop: () => engine.setEnabled(false) },
       })
     : null;
   if (web && config.web.open_browser) openBrowser(`http://127.0.0.1:${config.web.port}`);
@@ -633,10 +657,7 @@ if (import.meta.main) {
   if (argv[0] === 'engine') {
     runEngine(argv.slice(1)).then((code) => (process.exitCode = code));
   } else if (argv[0] === 'web') {
-    const paths = resolvePaths();
-    const config = loadConfig(paths);
-    startWeb(paths, config, { port: config.web.port });
-    if (config.web.open_browser) openBrowser(`http://127.0.0.1:${config.web.port}`);
+    runEngine(argv.slice(1), process.env, { webOnly: true }).then((code) => (process.exitCode = code));
   } else if (argv[0] === 'watch') {
     const ac = new AbortController();
     process.once('SIGINT', () => ac.abort());

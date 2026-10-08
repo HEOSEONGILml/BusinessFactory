@@ -38,6 +38,8 @@ export interface EngineOptions {
   log?: (line: string) => void;
   /** Replaces desktop/phone notifications (tests). */
   notify?: Sender;
+  /** Whether the engine starts switched on (default true). */
+  startEnabled?: boolean;
 }
 
 interface ActiveRun {
@@ -99,6 +101,8 @@ export class Engine {
   private readonly notify: Sender;
   private readonly ownerNotifier: OwnerNotifier;
   private readonly chatActive = new Map<string, ChatRun>();
+  /** The on/off switch. Off: no new runs start; runs in progress finish. */
+  private enabled: boolean;
 
   constructor(paths: Paths, config: Config, opts: EngineOptions = {}) {
     this.paths = paths;
@@ -109,6 +113,38 @@ export class Engine {
     this.log = opts.log ?? ((line) => this.defaultLog(line));
     this.notify = opts.notify ?? buildSender(config.notify, this.log);
     this.ownerNotifier = new OwnerNotifier(paths, this.notify);
+    this.enabled = opts.startEnabled ?? true;
+  }
+
+  get isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  get runningCount(): number {
+    return this.active.size + this.chatActive.size;
+  }
+
+  /**
+   * Switch the engine on or off (web console button). Turning it on also clears a halt —
+   * the owner has looked at the cause — and re-takes the system snapshot.
+   */
+  setEnabled(on: boolean): void {
+    if (on === this.enabled && !(on && this.haltReason)) return;
+    this.enabled = on;
+    if (on) {
+      if (this.haltReason) this.log('정지 원인을 확인했다는 사용자 조치로 다시 가동');
+      this.haltReason = null;
+      this.recover();
+      this.log('엔진 가동');
+    } else {
+      const n = this.runningCount;
+      this.log(n ? `엔진 정지 요청: 진행 중인 ${n}건을 마무리한 뒤 쉽니다` : '엔진 정지');
+    }
+    try {
+      writeFileAtomic(path.join(this.paths.company, '.engine-state.json'), JSON.stringify({ enabled: on }));
+    } catch {
+      // remembering the switch is a convenience
+    }
   }
 
   get halted(): string | null {
@@ -148,8 +184,9 @@ export class Engine {
   /** One scheduling pass: register due recurring goals, then launch whatever fits in the free slots. */
   tick(): void {
     if (this.haltReason) return;
-    this.fireSchedules();
     this.notifyOwner();
+    if (!this.enabled) return;
+    this.fireSchedules();
     if (this.pausedUntil) {
       if (this.now() < this.pausedUntil) return;
       this.log('사용량 한도 대기 종료, 재개');
@@ -189,8 +226,9 @@ export class Engine {
   /** The long-running loop behind `bf engine`. */
   async loop(signal: AbortSignal): Promise<void> {
     this.recover();
-    this.log(`엔진 시작 (동시 실행 ${this.config.max_concurrency}, 직원 ${listAgents(this.paths).length}명)`);
-    while (!signal.aborted && !this.haltReason) {
+    this.log(`엔진 ${this.enabled ? '시작' : '대기(꺼짐)'} (동시 실행 ${this.config.max_concurrency}, 직원 ${listAgents(this.paths).length}명)`);
+    // Keeps running while switched off or halted, so the web console can turn it back on.
+    while (!signal.aborted) {
       this.tick();
       await sleep(this.config.poll_seconds * 1000, signal);
     }
@@ -425,7 +463,8 @@ export class Engine {
 
   /** Console plus company/engine.log, so the history survives closing the window. */
   private defaultLog(line: string): void {
-    const stamped = `[${this.now().toLocaleString()}] ${line}`;
+    // One entry per line in the file, so followers (bf watch, the web feed) never see fragments.
+    const stamped = `[${this.now().toLocaleString()}] ${line.replace(/\s*\n\s*/g, ' ⏎ ')}`;
     console.log(`[${this.now().toLocaleTimeString()}] ${line}`);
     try {
       fs.appendFileSync(path.join(this.paths.company, 'engine.log'), stamped + '\n', 'utf8');

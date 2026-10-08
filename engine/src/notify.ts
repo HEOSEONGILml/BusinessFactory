@@ -84,6 +84,16 @@ export function ownerItems(board: Board): { key: string; notice: Notice }[] {
   for (const t of board.list()) {
     if (t.status === 'blocked' && t.ask_to === owner) {
       const key = `${t.id}:blocked:${t.updated_at}`;
+      if (!t.approval && t.questions?.length) {
+        // One notice per open item, so each request stands on its own.
+        for (const q of t.questions.filter((x) => x.answer === null)) {
+          items.push({
+            key: `${t.id}:q${q.id}:${t.questions.length}`,
+            notice: { title: `질문 · ${t.id} (${q.id}/${t.questions.length})`, body: `${q.text.slice(0, 200)}\n→ 웹 화면 또는 bf task answer ${num(t)} --item ${q.id} "답"` },
+          });
+        }
+        continue;
+      }
       if (t.approval) {
         items.push({ key, notice: { title: `결재 요청 · ${t.id}`, body: `${t.approval.what}\n→ bf approve ${num(t)} / bf deny ${num(t)} "사유"` } });
       } else {
