@@ -309,13 +309,17 @@ export class Board {
   }
 
   /** Assignee is stuck and needs an answer from whoever assigned the task. */
-  ask(actor: string, id: string, question: string): Task {
+  /**
+   * Assignee is stuck. The question goes to whoever assigned the task, or straight to the
+   * owner (`toOwner`) for things only the owner can do: sign-ups, payments, personal info.
+   */
+  ask(actor: string, id: string, question: string, toOwner = false): Task {
     return this.locked(() => {
       const doc = this.read(id);
       this.requireAssignee(actor, doc.task);
       this.requireStatus(doc.task, 'running');
       if (!question.trim()) throw new BoardError('질문 내용이 비어 있습니다.');
-      doc.task.ask_to = doc.task.created_by;
+      doc.task.ask_to = toOwner ? this.config.owner : doc.task.created_by;
       this.transition(doc, 'blocked');
       this.save(doc);
       this.log(id, actor, '질문', `→ ${doc.task.ask_to}: ${question}`);

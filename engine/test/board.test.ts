@@ -163,6 +163,20 @@ describe('업무 흐름', () => {
     assert.equal(board.answer('owner', c.id, '코인부터').status, 'pending');
   });
 
+  it('사용자만 할 수 있는 일은 사용자에게 직접 묻는다', () => {
+    const { board } = makeBoard();
+    const g = goal(board);
+    board.start(g.id);
+    const c = sub(board, g.id, 'ceo');
+    board.finishRun(g.id, 'delegated');
+    board.start(c.id);
+    const t = board.ask('worker', c.id, '콘솔 가입 부탁드립니다', true);
+    assert.equal(t.ask_to, 'owner');
+    assert.equal(board.read(g.id).task.status, 'waiting', '지시자는 깨우지 않는다');
+    assert.throws(() => board.answer('ceo', c.id, '내가 답함'), /owner 에게 온 것/);
+    assert.equal(board.answer('owner', c.id, '가입 완료').status, 'pending');
+  });
+
   it('하위 업무로 진전이 생기면 시도 횟수를 다시 센다', () => {
     const { board } = makeBoard({ max_attempts: 2 });
     const g = goal(board);

@@ -36,7 +36,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf task list [--all] [--status s] [--assignee a] [--project p]
   bf task show <id>
   bf task done <id> --summary "<요약>"
-  bf task ask <id> "<질문>"
+  bf task ask <id> [--owner] "<질문>"      (--owner: 사용자에게 직접)
   bf task answer <id> "<답변>"
   bf task pass <id> [--note "<메모>"]
   bf task reject <id> "<사유>"
@@ -368,8 +368,13 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
     }
 
     case 'ask': {
-      const [id, ...text] = args;
-      const task = board.ask(actor, requireId([id]), text.join(' '));
+      const { values, positionals } = parseArgs({
+        args,
+        allowPositionals: true,
+        options: { owner: { type: 'boolean' } },
+      });
+      const [id, ...text] = positionals;
+      const task = board.ask(actor, requireId([id]), text.join(' '), values.owner ?? false);
       io.out(`${task.id} → 질문대기 (답변자: ${task.ask_to}). 지금 실행을 마치세요; 답변이 오면 다시 시작됩니다.`);
       return 0;
     }
