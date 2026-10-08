@@ -8,6 +8,19 @@ import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, normalizeId, STA
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { listMemory } from './memory.ts';
+import {
+  createMeeting,
+  endMeeting,
+  ensureChannel,
+  ensureDm,
+  getConv,
+  lastMessage,
+  listConvs,
+  meetingNextRound,
+  ownerSpokeInMeeting,
+  postMessage,
+  readMessages,
+} from './chat.ts';
 import type { Paths } from './paths.ts';
 import { discardHires, installHires, pendingProposals } from './staff.ts';
 import { readUsage } from './usage.ts';
@@ -19,7 +32,7 @@ export interface EngineStatus {
   pausedUntil: string | null;
   halted: string | null;
   /** Runs in progress; only known when the console runs inside the engine. */
-  active?: { taskId: string; kind: 'work' | 'review'; agent: string; startedAt: string }[];
+  active?: { taskId: string; kind: 'work' | 'review' | 'chat'; agent: string; startedAt: string; title?: string; activity?: string | null }[];
 }
 
 type TaskList = ReturnType<Board['list']>;
@@ -34,17 +47,23 @@ export function buildOffice(board: Board, agents: { name: string; model: string 
     tasks.filter((t) => t.status === 'running').map((t) => ({ taskId: t.id, kind: 'work' as const, agent: t.assignee, startedAt: t.updated_at }));
   const byId = new Map(tasks.map((t) => [t.id, t]));
   return agents.map((a) => {
-    const runs = active.filter((r) => r.agent === a.name).map((r) => ({
-      taskId: r.taskId,
-      kind: r.kind,
-      title: byId.get(r.taskId)?.title ?? '',
-      startedAt: r.startedAt,
-      activity: lastActivity(board.taskDir(r.taskId)),
-    }));
+    const runs = active.filter((r) => r.agent === a.name).map((r) =>
+      r.kind === 'chat'
+        ? { taskId: r.taskId, kind: r.kind, title: r.title ?? '', startedAt: r.startedAt, activity: r.activity ?? null }
+        : {
+            taskId: r.taskId,
+            kind: r.kind,
+            title: byId.get(r.taskId)?.title ?? '',
+            startedAt: r.startedAt,
+            activity: lastActivity(board.taskDir(r.taskId)),
+          },
+    );
     const mine = tasks.filter((t) => t.assignee === a.name);
     return {
       ...a,
-      state: runs.length ? (runs.every((r) => r.kind === 'review') ? 'reviewing' : 'working') : 'idle',
+      state: runs.length
+        ? runs.every((r) => r.kind === 'chat') ? 'talking' : runs.every((r) => r.kind !== 'work') ? 'reviewing' : 'working'
+        : 'idle',
       runs,
       queue: mine.filter((t) => t.status === 'pending').length + (a.name === board.config.reviewer ? tasks.filter((t) => t.status === 'review').length : 0),
       waiting: mine.filter((t) => t.status === 'waiting' || t.status === 'blocked').length,
@@ -161,6 +180,24 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
   };
 }
 
+/** Conversation list for the messenger sidebar; #general and one channel per project always exist. */
+function chatList(board: Board, paths: Paths) {
+  ensureChannel(paths, 'general');
+  for (const p of new Set(board.list().map((t) => t.project).filter(Boolean) as string[])) {
+    try {
+      ensureChannel(paths, p, p);
+    } catch {
+      // project names that cannot be channel names simply get no channel
+    }
+  }
+  return listConvs(paths)
+    .map((c) => {
+      const last = lastMessage(paths, c.id);
+      return { ...c, last: last ? { at: last.at, from: last.from, text: last.text.slice(0, 120) } : null };
+    })
+    .sort((a, b) => (b.last?.at ?? b.created_at).localeCompare(a.last?.at ?? a.created_at));
+}
+
 function taskDetail(board: Board, id: string) {
   const { task, body } = board.read(id);
   const dir = board.taskDir(id);
@@ -247,6 +284,14 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
         if (parts[3] === 'file') return send(res, 200, { text: readOutput(board, id, url.searchParams.get('path') ?? '') });
         return send(res, 200, taskDetail(board, id));
       }
+      if (req.method === 'GET' && url.pathname === '/api/chat') {
+        return send(res, 200, { convs: chatList(board, paths), agents: listAgents(paths).map((a) => a.name) });
+      }
+      if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'chat' && parts[2]) {
+        const conv = getConv(paths, parts[2]);
+        const speaking = (engineStatus().active ?? []).filter((r) => r.kind === 'chat' && r.taskId === conv.id).map((r) => ({ agent: r.agent, activity: r.activity ?? null }));
+        return send(res, 200, { conv, messages: readMessages(paths, conv.id, 300), speaking });
+      }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         return streamEvents(req, res, board, paths);
       }
@@ -269,6 +314,41 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
           });
           log(`웹: 목표 등록 ${t.id}`);
           return send(res, 200, { id: t.id });
+        }
+        const names = listAgents(paths).map((a) => a.name);
+        if (url.pathname === '/api/chat/dm') {
+          if (!names.includes(String(body.agent))) throw new BoardError('없는 직원입니다.');
+          return send(res, 200, { id: ensureDm(paths, owner, String(body.agent)).id });
+        }
+        if (url.pathname === '/api/chat/channel') {
+          return send(res, 200, { id: ensureChannel(paths, String(body.name ?? '')).id });
+        }
+        if (parts[0] === 'api' && parts[1] === 'chat' && parts[2] && parts[3] === 'post') {
+          const conv = getConv(paths, parts[2]);
+          const msg = postMessage(paths, conv.id, owner, String(body.text ?? ''), { chain: 0, names });
+          if (conv.kind === 'meeting') ownerSpokeInMeeting(paths, conv.id, msg.mentions, names);
+          return send(res, 200, { ok: true });
+        }
+        if (url.pathname === '/api/meeting') {
+          const participants = (Array.isArray(body.participants) ? body.participants : []).map(String).filter((n: string) => names.includes(n));
+          const conv = createMeeting(paths, {
+            title: String(body.title ?? ''),
+            agenda: String(body.agenda ?? ''),
+            participants,
+            owner,
+            facilitator: config.ceo,
+          });
+          ownerSpokeInMeeting(paths, conv.id, [], names);
+          log(`웹: 회의 시작 ${conv.title}`);
+          return send(res, 200, { id: conv.id });
+        }
+        if (parts[0] === 'api' && parts[1] === 'meeting' && parts[2] && parts[3] === 'round') {
+          meetingNextRound(paths, parts[2], names);
+          return send(res, 200, { ok: true });
+        }
+        if (parts[0] === 'api' && parts[1] === 'meeting' && parts[2] && parts[3] === 'end') {
+          endMeeting(paths, parts[2]);
+          return send(res, 200, { ok: true });
         }
         if (parts[0] === 'api' && parts[1] === 'task' && parts[2] && actions[parts[3]]) {
           const id = normalizeId(parts[2]);
@@ -302,6 +382,7 @@ function streamEvents(req: http.IncomingMessage, res: http.ServerResponse, board
   let offset = fs.existsSync(logFile) ? fs.statSync(logFile).size : 0;
   let carry = '';
   let signature = '';
+  let chatSignature: string | null = null;
 
   // Recent history first, so the feed is not empty on load.
   if (fs.existsSync(logFile)) {
@@ -339,6 +420,14 @@ function streamEvents(req: http.IncomingMessage, res: http.ServerResponse, board
       if (sig !== signature) {
         if (signature) res.write(`event: changed\ndata: {}\n\n`);
         signature = sig;
+      }
+      const chatDir = path.join(paths.company, 'chat');
+      const chatSig = fs.existsSync(chatDir)
+        ? fs.readdirSync(chatDir).map((f) => `${f}:${fs.statSync(path.join(chatDir, f)).mtimeMs}`).join('|')
+        : '';
+      if (chatSig !== chatSignature) {
+        if (chatSignature !== null) res.write(`event: chat\ndata: {}\n\n`);
+        chatSignature = chatSig;
       }
       res.write(`: ping\n\n`);
     } catch {

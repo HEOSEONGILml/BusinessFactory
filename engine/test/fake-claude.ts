@@ -11,21 +11,23 @@ import { resolvePaths } from '../src/paths.ts';
 
 const args = process.argv.slice(2);
 const agent = args[args.indexOf('--agent') + 1];
-const taskId = process.env.BF_TASK!;
+const taskId = process.env.BF_TASK ?? '';
+const chatId = process.env.BF_CHAT ?? '';
 const plan: Record<string, string> = JSON.parse(process.env.FAKE_PLAN ?? '{}');
 const behaviour = plan[agent] ?? 'done';
 const prompt = fs.readFileSync(0, 'utf8');
 
 const paths = resolvePaths(process.env);
 const board = new Board(paths, loadConfig(paths));
-const task = board.read(taskId).task;
+const task = taskId ? board.read(taskId).task : (null as never);
 
 if (process.env.FAKE_LOG) {
   fs.appendFileSync(
     process.env.FAKE_LOG,
     JSON.stringify({
       agent,
-      task: taskId,
+      task: taskId || chatId,
+      chat: chatId || null,
       cwd: process.cwd(),
       args,
       prompt,
@@ -79,6 +81,16 @@ function reply(result: string, extra: Record<string, unknown> = {}) {
       ...extra,
     }) + '\n',
   );
+}
+
+if (chatId) {
+  // Messenger mode: the final message is the reply. Plan key "chat:<agent>".
+  const mode = plan[`chat:${agent}`] ?? 'say';
+  if (prompt.includes('회의록을 작성')) reply('## 결론\n출시 먼저\n\n## 할 일\n- 미니앱 전환 (developer)');
+  else if (mode === 'pass') reply('(패스)');
+  else if (mode.startsWith('mention:')) reply(`@${mode.slice(8)} 당신 생각은? (${agent})`);
+  else reply(`${agent} 의견입니다`);
+  process.exit(0);
 }
 
 switch (behaviour) {

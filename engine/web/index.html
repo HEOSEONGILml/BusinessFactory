@@ -210,6 +210,60 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .prose li { margin: 3px 0; }
 .card .prose { font-size: 15px; line-height: 1.7; }
 
+/* ---------- top tabs ---------- */
+nav.views { display: flex; gap: 4px; }
+nav.views button { border: none; background: none; padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 15px; color: var(--muted); cursor: pointer; }
+nav.views button.on { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- office: talking ---------- */
+.desk.talking .screen { background: #1c2244; color: #c9d1ff; }
+.desk.talking .screen .cursor { background: #c9d1ff; }
+.desk.talking .avatar { box-shadow: 0 0 0 3px #7c8cff; }
+.badge.talk { background: #ebe8ff; border-color: transparent; color: #5546d6; }
+
+/* ---------- messenger ---------- */
+.chat { display: grid; grid-template-columns: 300px 1fr; gap: 20px; height: calc(100vh - 104px); min-height: 520px; }
+.chat > section { display: flex; flex-direction: column; min-height: 0; }
+.chat-side .panel-body { overflow-y: auto; padding: 10px; }
+.group-h { font-size: 13.5px; font-weight: 800; color: var(--muted); padding: 12px 10px 6px; display: flex; align-items: center; }
+.group-h button { margin-left: auto; }
+.conv-item { display: flex; gap: 10px; padding: 8px 10px; border-radius: 9px; cursor: pointer; align-items: center; }
+.conv-item:hover { background: var(--bg); }
+.conv-item.on { background: var(--accent-soft); }
+.conv-item .ic { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; flex: none; background: var(--bg); }
+.conv-item .t { font-weight: 700; font-size: 15px; line-height: 1.3; }
+.conv-item .p { color: var(--faint); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.conv-item .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-left: auto; flex: none; animation: pulse 1.2s infinite; }
+.chat-head { padding: 12px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.chat-head h3 { margin: 0; font-size: 18px; letter-spacing: -.2px; }
+.chat-head .agenda { width: 100%; color: var(--muted); font-size: 14px; }
+.people { display: flex; gap: 6px; flex-wrap: wrap; }
+.person-chip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 10px 2px 3px; border-radius: 999px; border: 1px solid var(--line); font-size: 13.5px; font-weight: 700; }
+.person-chip .mini { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; }
+.person-chip.speaking { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+.person-chip.next { border-style: dashed; }
+.msgs { flex: 1; overflow-y: auto; padding: 14px 22px; }
+.msg { display: grid; grid-template-columns: 40px 1fr; gap: 12px; padding: 9px 0; }
+.msg .avatar { width: 40px; height: 40px; font-size: 20px; border-width: 2px; }
+.msg .who { font-weight: 800; font-size: 15px; }
+.msg .when { color: var(--faint); font-size: 12.5px; margin-left: 6px; font-weight: 500; }
+.msg .body { margin-top: 2px; }
+.msg .body p:first-child { margin-top: 0; }
+.msg.summary .body { background: var(--ok-soft); border-radius: 10px; padding: 12px 16px; margin-top: 6px; }
+.msg.system .body { color: var(--faint); }
+.day { text-align: center; color: var(--faint); font-size: 12.5px; margin: 10px 0; }
+.typing { padding: 9px 22px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); min-height: 40px; }
+.typing b { color: var(--text); }
+.typing .dots::after { content: "…"; animation: pulse 1s infinite; }
+.chat-compose { border-top: 1px solid var(--line); padding: 12px 16px; display: flex; gap: 10px; align-items: flex-end; }
+.chat-compose textarea { flex: 1; min-height: 48px; max-height: 220px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 10px; padding: 11px 13px; background: var(--bg); font-size: 15px; line-height: 1.55; }
+.chat-empty { flex: 1; display: grid; place-items: center; color: var(--faint); text-align: center; padding: 30px; }
+@media (max-width: 900px) { .chat { grid-template-columns: 1fr; height: auto; } .msgs { max-height: 60vh; } }
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.pick label { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+.pick label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.field { width: 100%; border: 1px solid var(--line-strong); border-radius: 8px; padding: 9px 11px; background: var(--bg); font-size: 15px; }
+
 #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 20px; border-radius: 10px; font-weight: 700; font-size: 15px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
 #toast.show { opacity: 1; } #toast.err { background: var(--bad); color: #fff; }
 </style>
@@ -218,10 +272,12 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 <header>
   <div class="brand">BusinessFactory<small id="company"></small></div>
   <span id="engine" class="pill idle">확인 중</span>
+  <nav class="views"><button data-view="dash" class="on">대시보드</button><button data-view="chat">메신저</button></nav>
   <div class="meters" id="meters"></div>
 </header>
 
 <main>
+ <div id="viewDash">
   <div class="composer">
     <textarea id="goalText" placeholder="회사에 시킬 일을 적으세요. 예) 돈 벌 수 있는 웹 서비스 아이디어 10개를 조사해서 순위를 매겨줘"></textarea>
     <div class="row">
@@ -266,7 +322,34 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
       <div class="feed" id="feed"></div>
     </section>
   </div>
+ </div>
+
+ <div id="viewChat" hidden>
+  <div class="chat">
+    <section class="panel chat-side">
+      <h2>메신저 <span class="spacer"></span><button class="btn primary small" id="meetBtn">🗣 회의하기</button></h2>
+      <div class="panel-body" id="convList"></div>
+    </section>
+    <section class="panel" id="chatMain">
+      <div class="chat-empty">왼쪽에서 채널이나 직원을 고르거나,<br>회의하기로 회의를 여세요.</div>
+    </section>
+  </div>
+ </div>
 </main>
+
+<dialog id="meetDlg">
+  <div class="dlg-head"><h3>회의하기</h3><button class="btn small" onclick="meetDlg.close()">닫기</button></div>
+  <div class="dlg-body">
+    <h4 style="margin-top:0">회의 제목</h4>
+    <input id="meetTitle" class="field" placeholder="예) 다음 달 BlindCandle 우선순위">
+    <h4>안건 (무엇을 논의할지)</h4>
+    <textarea id="meetAgenda" class="field" style="min-height:110px" placeholder="예) 토스 미니앱 출시와 주식 섹션 중 무엇을 먼저 할지, 각자 근거를 들어 의견을 주세요."></textarea>
+    <h4>참석자</h4>
+    <div class="pick" id="meetPeople"></div>
+    <p class="hint">참석자가 한 명씩 차례로 발언합니다. 발언 하나가 실행 한 번이라 사용량이 듭니다.</p>
+    <div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn primary" id="meetStart">회의 시작</button></div>
+  </div>
+</dialog>
 
 <dialog id="dlg">
   <div class="dlg-head"><h3 id="dlgTitle"></h3><button class="btn small" onclick="dlg.close()">닫기</button></div>
@@ -372,22 +455,23 @@ function avatarOf(name) {
 function renderOffice() {
   const desks = state.office;
   const working = desks.filter((d) => d.state !== 'idle').length;
-  $('#officeSummary').textContent = `직원 ${desks.length}명 · 일하는 중 ${working}명`;
+  $('#officeSummary').textContent = `직원 ${desks.length}명 · 활동 중 ${working}명`;
   $('#office').innerHTML = desks.map((d) => {
     const [emoji, bg] = avatarOf(d.name);
     const run = d.runs[0];
     const screen = run
-      ? `<div class="task">${run.kind === 'review' ? '🔍 검수: ' : ''}${esc(run.title)}</div>
+      ? `<div class="task">${run.kind === 'review' ? '🔍 검수: ' : run.kind === 'chat' ? '💬 ' : ''}${esc(run.title)}</div>
          <div class="now">${esc(run.activity ?? '시작하는 중')}<span class="cursor"></span></div>`
       : `<div class="off">${d.queue ? '⏳ 차례 기다리는 중' : '☕ 대기 중'}</div>`;
     const badges = [
-      run ? `<span class="badge ${run.kind === 'review' ? 'rev' : 'live'}">${run.kind === 'review' ? '검수 중' : '작업 중'} · ${ago(run.startedAt)}</span>` : '',
+      run ? `<span class="badge ${{ review: 'rev', chat: 'talk' }[run.kind] ?? 'live'}">${{ review: '검수 중', chat: '대화 중' }[run.kind] ?? '작업 중'} · ${ago(run.startedAt)}</span>` : '',
       d.runs.length > 1 ? `<span class="badge live">+${d.runs.length - 1}건 동시</span>` : '',
       d.queue ? `<span class="badge queue">대기 업무 ${d.queue}</span>` : '',
       d.waiting ? `<span class="badge">보류 ${d.waiting}</span>` : '',
       `<span class="badge">완료 ${d.done}</span>`,
     ].join('');
-    return `<div class="desk ${d.state}${run ? ' clickable' : ''}" ${run ? `data-open="${run.taskId}"` : ''} title="${esc(d.description)}">
+    const target = run ? (run.kind === 'chat' ? `data-conv="${run.taskId}"` : `data-open="${run.taskId}"`) : '';
+    return `<div class="desk ${d.state}${run ? ' clickable' : ''}" ${target} title="${esc(d.description)}">
       <div class="screen">${screen}</div>
       <div class="stand"></div>
       <div class="table"><div class="keyboard"></div><span class="mug">${d.state === 'idle' ? '☕' : ''}</span></div>
@@ -398,7 +482,10 @@ function renderOffice() {
     </div>`;
   }).join('') || '<div class="empty">직원이 없습니다</div>';
 }
-$('#office').addEventListener('click', (ev) => { const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open); });
+$('#office').addEventListener('click', (ev) => {
+  const conv = ev.target.closest('[data-conv]'); if (conv) { showView('chat'); return openConv(conv.dataset.conv); }
+  const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open);
+});
 
 /* ---------- inbox ---------- */
 function renderInbox() {
@@ -592,9 +679,13 @@ function connect() {
     const line = JSON.parse(e.data);
     addFeed(line);
     // Keep the office monitors in step with what employees are doing.
-    if (line.includes(' ▸ ')) { clearTimeout(connect.t); connect.t = setTimeout(refresh, 700); }
+    if (line.includes(' ▸ ') || line.includes('💬')) {
+      clearTimeout(connect.t);
+      connect.t = setTimeout(() => { refresh(); if (!$('#viewChat').hidden && currentConv) openConv(currentConv, true); }, 700);
+    }
   });
   es.addEventListener('changed', () => refresh());
+  es.addEventListener('chat', () => { if (!$('#viewChat').hidden) { loadChatList(); if (currentConv) openConv(currentConv, true); } });
   es.onopen = () => ($('#feedState').textContent = '● 연결됨');
   es.onerror = () => { $('#feedState').textContent = '재연결 중…'; };
 }
@@ -608,7 +699,151 @@ async function refresh() {
   } catch (e) { $('#engine').className = 'pill bad'; $('#engine').textContent = '서버 연결 끊김'; }
 }
 
+/* ---------- views ---------- */
+function showView(v) {
+  document.querySelectorAll('nav.views button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+  $('#viewDash').hidden = v !== 'dash';
+  $('#viewChat').hidden = v !== 'chat';
+  if (v === 'chat') loadChat();
+  try { localStorage.setItem('bf-view', v); } catch {}
+}
+document.querySelectorAll('nav.views button').forEach((b) => (b.onclick = () => showView(b.dataset.view)));
+
+/* ---------- messenger ---------- */
+let chat = { convs: [], agents: [] }, currentConv = null, convData = null;
+const icon = (name) => name === 'owner' ? ['🙂', '#e9ecef'] : avatarOf(name);
+const whoName = (n) => n === 'owner' ? '나 (사용자)' : n;
+
+async function loadChat() {
+  try { chat = await api('/api/chat'); } catch (e) { return toast(e.message, true); }
+  renderConvList();
+  if (currentConv) openConv(currentConv, true);
+}
+
+function renderConvList() {
+  const live = new Set((state?.engine?.active ?? []).filter((r) => r.kind === 'chat').map((r) => r.taskId));
+  const item = (c, ic, bg, title) => `<div class="conv-item${c && c.id === currentConv ? ' on' : ''}" data-conv="${c ? c.id : ''}" ${!c ? `data-dm="${esc(title)}"` : ''}>
+      <div class="ic" style="background:${bg}">${ic}</div>
+      <div style="min-width:0;flex:1"><div class="t">${esc(c?.kind === 'dm' ? title : c?.title ?? title)}</div>
+      <div class="p">${c?.last ? esc(`${whoName(c.last.from)}: ${c.last.text.replace(/[#*`>|]+/g, '').replace(/\s+/g, ' ').trim()}`) : c?.kind === 'meeting' ? '' : '대화를 시작해 보세요'}</div></div>
+      ${c && live.has(c.id) ? '<span class="live-dot" title="발언 중"></span>' : ''}</div>`;
+  const channels = chat.convs.filter((c) => c.kind === 'channel').sort((a, b) => a.title.localeCompare(b.title));
+  const meetings = chat.convs.filter((c) => c.kind === 'meeting');
+  const dms = chat.agents.map((a) => {
+    const c = chat.convs.find((x) => x.kind === 'dm' && x.members.includes('owner') && x.members.includes(a));
+    const [e, bg] = avatarOf(a);
+    return item(c, e, bg, a);
+  });
+  const agentDms = chat.convs.filter((c) => c.kind === 'dm' && !c.members.includes('owner'));
+  $('#convList').innerHTML =
+    `<div class="group-h">채널 <button class="btn small" id="newChannel">+ 새 채널</button></div>` + channels.map((c) => item(c, '#', 'var(--bg)')).join('') +
+    `<div class="group-h">회의</div>` + (meetings.length ? meetings.map((c) => item(c, c.status === 'closed' ? '✅' : '🗣', c.status === 'closed' ? 'var(--ok-soft)' : '#ebe8ff')).join('') : '<div class="hint" style="padding:0 10px 6px">아직 없습니다</div>') +
+    `<div class="group-h">DM</div>` + dms.join('') +
+    (agentDms.length ? `<div class="group-h">직원끼리 DM</div>` + agentDms.map((c) => item(c, '👥', 'var(--bg)', c.title)).join('') : '');
+  $('#newChannel').onclick = async (ev) => {
+    ev.stopPropagation();
+    const name = prompt('새 채널 이름 (예: marketing)');
+    if (!name) return;
+    try { const r = await api('/api/chat/channel', { name }); await loadChat(); openConv(r.id); } catch (e) { toast(e.message, true); }
+  };
+}
+
+$('#convList').addEventListener('click', async (ev) => {
+  const el = ev.target.closest('.conv-item'); if (!el) return;
+  if (el.dataset.conv) return openConv(el.dataset.conv);
+  try { const r = await api('/api/chat/dm', { agent: el.dataset.dm }); await loadChat(); openConv(r.id); } catch (e) { toast(e.message, true); }
+});
+
+async function openConv(id, keepScroll) {
+  try { convData = await api(`/api/chat/${id}`); } catch (e) { return toast(e.message, true); }
+  const switching = currentConv !== id;
+  currentConv = id;
+  document.querySelectorAll('.conv-item').forEach((x) => x.classList.toggle('on', x.dataset.conv === id));
+  const { conv, messages, speaking } = convData;
+  const meeting = conv.kind === 'meeting';
+  const agentsHere = meeting ? conv.members.filter((m) => m !== 'owner') : conv.kind === 'dm' ? conv.members.filter((m) => m !== 'owner') : [];
+  const speakingSet = new Set(speaking.map((s) => s.agent));
+  const chips = agentsHere.map((a) => {
+    const [e, bg] = avatarOf(a);
+    const next = meeting && conv.queue?.[0] === a && !speakingSet.has(a);
+    return `<span class="person-chip${speakingSet.has(a) ? ' speaking' : ''}${next ? ' next' : ''}"><span class="mini" style="background:${bg}">${e}</span>${esc(a)}${speakingSet.has(a) ? ' · 발언 중' : ''}</span>`;
+  }).join('');
+  let actions = '';
+  if (meeting && conv.status === 'open') actions = '<button class="btn small" id="mRound">🔁 토론 한 바퀴 더</button><button class="btn small danger" id="mEnd">회의 종료 · 회의록</button>';
+  if (meeting && conv.status === 'closing') actions = '<span class="chip s-review">회의록 작성 중</span>';
+  if (meeting && conv.status === 'closed') actions = '<span class="chip s-done">종료</span><button class="btn small primary" id="mGoal">할 일을 목표로 등록</button>';
+  const title = conv.kind === 'dm' ? `${conv.members.filter((m) => m !== 'owner').join(', ')} 와(과)의 DM` : conv.title;
+  let lastDay = '';
+  const body = messages.map((m) => {
+    const day = new Date(m.at).toLocaleDateString();
+    const sep = day !== lastDay ? `<div class="day">${day}</div>` : '';
+    lastDay = day;
+    const [e, bg] = icon(m.from);
+    return `${sep}<div class="msg ${m.kind}"><div class="avatar" style="background:${bg}">${e}</div><div style="min-width:0">
+      <div><span class="who">${esc(whoName(m.from))}</span><span class="when">${new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${m.kind === 'summary' ? ' · 회의록' : ''}</span></div>
+      <div class="body prose">${md(m.text)}</div></div></div>`;
+  }).join('');
+  const typing = speaking.length
+    ? speaking.map((s) => `<b>${esc(s.agent)}</b> ${meeting ? '발언' : '답장'} 작성 중<span class="dots"></span>${s.activity ? ` <span style="color:var(--faint)">▸ ${esc(s.activity)}</span>` : ''}`).join('<br>')
+    : meeting && conv.queue?.length ? `다음 발언: <b>${esc(conv.queue.join(' → '))}</b>${state?.engine?.running ? '' : ' (엔진이 켜지면 시작합니다)'}`
+    : meeting && conv.status === 'open' ? '모두 발언했습니다. 의견을 더 주시거나, 한 바퀴 더 돌리거나, 회의를 마치세요.'
+    : conv.kind === 'channel' ? '@이름 으로 부르면 그 직원이 답합니다. 예: @ceo 이번 주 진행 상황 알려줘' : '';
+  const placeholder = meeting ? (conv.status === 'open' ? '회의에 의견을 남기세요. 특정 직원에게만 물으려면 @이름 (Enter 전송, Shift+Enter 줄바꿈)' : '끝난 회의입니다') : '메시지 (Enter 전송, Shift+Enter 줄바꿈)';
+  const msgsEl = document.querySelector('#chatMain .msgs');
+  const nearBottom = !msgsEl || msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+  const draft = document.querySelector('#chatMain textarea')?.value ?? '';
+  $('#chatMain').innerHTML = `
+    <div class="chat-head"><h3>${esc(title)}</h3><div class="people">${chips}</div><span style="flex:1"></span>${actions}
+      ${meeting ? `<div class="agenda">안건: ${esc(conv.agenda)} · 진행 ${esc(conv.facilitator)}</div>` : ''}</div>
+    <div class="msgs">${body || '<div class="chat-empty">아직 메시지가 없습니다</div>'}</div>
+    <div class="typing">${typing}</div>
+    <div class="chat-compose"><textarea placeholder="${esc(placeholder)}" ${meeting && conv.status !== 'open' ? 'disabled' : ''}></textarea>
+      <button class="btn primary" id="sendBtn" ${meeting && conv.status !== 'open' ? 'disabled' : ''}>보내기</button></div>`;
+  const ta = document.querySelector('#chatMain textarea');
+  if (!switching) ta.value = draft;
+  const box = document.querySelector('#chatMain .msgs');
+  if (switching || nearBottom || !keepScroll) box.scrollTop = box.scrollHeight;
+  const send = async () => {
+    const text = ta.value.trim(); if (!text) return;
+    try { await api(`/api/chat/${id}/post`, { text }); ta.value = ''; await openConv(id); loadChatList(); } catch (e) { toast(e.message, true); }
+  };
+  $('#sendBtn').onclick = send;
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+  if ($('#mRound')) $('#mRound').onclick = async () => { try { await api(`/api/meeting/${id}/round`, {}); toast('한 바퀴 더 돌립니다'); openConv(id); } catch (e) { toast(e.message, true); } };
+  if ($('#mEnd')) $('#mEnd').onclick = async () => { if (!confirm('회의를 마치고 회의록을 작성할까요?')) return; try { await api(`/api/meeting/${id}/end`, {}); toast('진행자가 회의록을 작성합니다'); openConv(id); } catch (e) { toast(e.message, true); } };
+  if ($('#mGoal')) $('#mGoal').onclick = () => {
+    const summary = [...messages].reverse().find((m) => m.kind === 'summary')?.text ?? '';
+    const todo = /##\s*할 일([\s\S]*?)(\n##\s|$)/.exec(summary)?.[1]?.trim() ?? summary;
+    showView('dash');
+    $('#goalText').value = `회의 "${conv.title}"에서 정한 할 일을 진행하라.\n\n${todo}`;
+    $('#goalText').focus();
+    toast('목표 입력창에 할 일을 옮겼습니다. 확인 후 등록하세요');
+  };
+}
+
+async function loadChatList() {
+  try { chat = await api('/api/chat'); renderConvList(); } catch {}
+}
+
+$('#meetBtn').onclick = () => {
+  $('#meetPeople').innerHTML = chat.agents.map((a) => {
+    const [e, bg] = avatarOf(a);
+    return `<label><input type="checkbox" value="${esc(a)}" ${a === 'ceo' ? 'checked' : ''}><span class="mini avatar" style="width:30px;height:30px;font-size:16px;background:${bg}">${e}</span><b>${esc(a)}</b></label>`;
+  }).join('');
+  meetDlg.showModal();
+};
+$('#meetStart').onclick = async () => {
+  const participants = [...document.querySelectorAll('#meetPeople input:checked')].map((i) => i.value);
+  try {
+    const r = await api('/api/meeting', { title: $('#meetTitle').value, agenda: $('#meetAgenda').value, participants });
+    meetDlg.close(); $('#meetTitle').value = ''; $('#meetAgenda').value = '';
+    await loadChat(); openConv(r.id);
+    toast('회의를 시작했습니다. 참석자들이 차례로 발언합니다');
+  } catch (e) { toast(e.message, true); }
+};
+
 refresh(); connect();
+try { if (localStorage.getItem('bf-view') === 'chat') showView('chat'); } catch {}
 setInterval(refresh, 5000);
 </script>
 </body>

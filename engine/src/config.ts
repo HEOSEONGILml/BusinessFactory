@@ -30,6 +30,16 @@ export interface Config {
    * Leaves room for the owner's own Claude use. Windows: five_hour, seven_day.
    */
   usage_ceiling: Record<string, number>;
+  /** Messenger and meetings: replies run as short, read-only employee runs. */
+  chat: {
+    max_concurrency: number;
+    /** Agent-to-agent reply chains stop after this many hops. */
+    max_chain: number;
+    max_turns: number;
+    timeout_minutes: number;
+    /** In a meeting, agent turns allowed per participant before the owner must speak again. */
+    meeting_turns_per_participant: number;
+  };
   /** Local web console started with the engine. */
   web: { enabled: boolean; port: number; open_browser: boolean };
   /** How the owner is told that something needs them. */
@@ -53,6 +63,7 @@ export const DEFAULT_CONFIG: Config = {
   notify: DEFAULT_NOTIFY,
   usage_ceiling: { five_hour: 0.9, seven_day: 0.9 },
   web: { enabled: true, port: 4300, open_browser: true },
+  chat: { max_concurrency: 2, max_chain: 3, max_turns: 12, timeout_minutes: 5, meeting_turns_per_participant: 2 },
   claude_command: ['claude'],
 };
 
@@ -62,5 +73,6 @@ export function loadConfig(paths: Paths): Config {
   return { ...DEFAULT_CONFIG, ...raw, notify: { ...DEFAULT_NOTIFY, ...(raw.notify ?? {}) },
     usage_ceiling: { ...DEFAULT_CONFIG.usage_ceiling, ...(raw.usage_ceiling ?? {}) },
     web: { ...DEFAULT_CONFIG.web, ...(raw.web ?? {}) },
+    chat: { ...DEFAULT_CONFIG.chat, ...(raw.chat ?? {}) },
   };
 }

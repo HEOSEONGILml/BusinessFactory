@@ -8,6 +8,7 @@ import { initCompany } from './company.ts';
 import { loadConfig } from './config.ts';
 import { Engine } from './engine.ts';
 import { addMemory, listMemory, readMemory } from './memory.ts';
+import { listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
 import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
@@ -52,6 +53,12 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf hire list
   bf memory list | bf memory show <주제>
   bf memory add <주제> "<내용>" [--title "<새 주제 제목>"]
+
+메신저 (대화용 — 실제 일은 목표·업무로)
+  bf chat list                            채널·DM·회의 목록
+  bf chat read <#채널|@직원|대화id> [--limit n]
+  bf chat post <#채널|@직원|대화id> "<메시지>"   (@이름 으로 부르면 그 직원이 답장)
+  bf dm <직원> "<메시지>"
 
 환경변수
   BF_ACTOR  호출자 (기본: owner)   BF_TASK  현재 수행 중인 업무
@@ -247,6 +254,37 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
         return 0;
       }
       throw new BoardError('사용법: bf memory list | show <주제> | add <주제> "<내용>" [--title ...]');
+    }
+
+    case 'chat':
+    case 'dm': {
+      const names = listAgents(paths).map((a) => a.name);
+      if (cmd === 'dm' || sub === 'post') {
+        const [target, ...text] = cmd === 'dm' ? [`@${sub ?? ''}`, ...rest] : rest;
+        if (!target || target === '@') throw new BoardError('받는 곳이 필요합니다. 예: bf chat post #general "..."');
+        const conv = resolveTarget(paths, target, actor, names);
+        // Messages from the owner start a chain; anything an employee says is already one hop in.
+        const msg = postMessage(paths, conv.id, actor, text.join(' '), { chain: actor === config.owner ? 0 : 1, names });
+        if (conv.kind === 'meeting' && actor === config.owner) ownerSpokeInMeeting(paths, conv.id, msg.mentions, names);
+        io.out(`${conv.title} 에 보냈습니다.${msg.mentions.length ? ` (${msg.mentions.join(', ')} 에게 답장 요청)` : ''}`);
+        return 0;
+      }
+      if (sub === 'read') {
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { limit: { type: 'string' } } });
+        if (!positionals[0]) throw new BoardError('읽을 대화가 필요합니다. 예: bf chat read #general');
+        const conv = resolveTarget(paths, positionals[0], actor, names);
+        const msgs = readMessages(paths, conv.id, Number(values.limit ?? 30));
+        io.out(`== ${conv.title} ==`);
+        io.out(msgs.length ? transcript(msgs) : '(메시지 없음)');
+        return 0;
+      }
+      if (sub === 'list' || sub === undefined) {
+        const convs = listConvs(paths).filter((c) => c.kind !== 'dm' || c.members.includes(actor) || actor === config.owner);
+        if (convs.length === 0) io.out('대화가 아직 없습니다.');
+        for (const c of convs) io.out(`${c.kind.padEnd(8)} ${c.id.padEnd(36)} ${c.title}${c.status ? ` [${c.status}]` : ''}`);
+        return 0;
+      }
+      throw new BoardError('사용법: bf chat list | read <대상> | post <대상> "<메시지>" | bf dm <직원> "<메시지>"');
     }
 
     case 'usage': {
