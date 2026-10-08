@@ -543,6 +543,7 @@ export async function runEngine(argv: string[], env: NodeJS.ProcessEnv = process
           running: true,
           pausedUntil: engine.pausedUntilTime?.toISOString() ?? null,
           halted: engine.halted,
+          active: engine.activeRuns(),
         }),
       })
     : null;

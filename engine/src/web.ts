@@ -18,6 +18,39 @@ export interface EngineStatus {
   running: boolean;
   pausedUntil: string | null;
   halted: string | null;
+  /** Runs in progress; only known when the console runs inside the engine. */
+  active?: { taskId: string; kind: 'work' | 'review'; agent: string; startedAt: string }[];
+}
+
+type TaskList = ReturnType<Board['list']>;
+
+/**
+ * One desk per employee: what they are doing now and what is piled up for them.
+ * Without live run info (console started on its own), running tasks stand in for it.
+ */
+export function buildOffice(board: Board, agents: { name: string; model: string | null; description: string }[], tasks: TaskList, engine: EngineStatus) {
+  const active =
+    engine.active ??
+    tasks.filter((t) => t.status === 'running').map((t) => ({ taskId: t.id, kind: 'work' as const, agent: t.assignee, startedAt: t.updated_at }));
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  return agents.map((a) => {
+    const runs = active.filter((r) => r.agent === a.name).map((r) => ({
+      taskId: r.taskId,
+      kind: r.kind,
+      title: byId.get(r.taskId)?.title ?? '',
+      startedAt: r.startedAt,
+      activity: lastActivity(board.taskDir(r.taskId)),
+    }));
+    const mine = tasks.filter((t) => t.assignee === a.name);
+    return {
+      ...a,
+      state: runs.length ? (runs.every((r) => r.kind === 'review') ? 'reviewing' : 'working') : 'idle',
+      runs,
+      queue: mine.filter((t) => t.status === 'pending').length + (a.name === board.config.reviewer ? tasks.filter((t) => t.status === 'review').length : 0),
+      waiting: mine.filter((t) => t.status === 'waiting' || t.status === 'blocked').length,
+      done: mine.filter((t) => t.status === 'done').length,
+    };
+  });
 }
 
 export interface WebOptions {
@@ -120,6 +153,7 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
       activity: t.status === 'running' ? lastActivity(board.taskDir(t.id)) : null,
     })),
     agents: listAgents(paths).map((a) => ({ name: a.name, model: a.model, description: a.description })),
+    office: buildOffice(board, listAgents(paths).map((a) => ({ name: a.name, model: a.model, description: a.description })), tasks, engine),
     workspaces: fs.existsSync(paths.workspaces)
       ? fs.readdirSync(paths.workspaces, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
       : [],

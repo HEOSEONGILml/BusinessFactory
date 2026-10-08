@@ -4,87 +4,134 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BusinessFactory</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
 :root {
-  --bg: #f5f6f8; --panel: #ffffff; --line: #e3e6eb; --text: #1d2330; --muted: #6b7385; --faint: #9aa1b0;
-  --accent: #3b5bdb; --accent-soft: #e7ecff; --ok: #2f9e44; --ok-soft: #e6f6ea; --warn: #e8890c; --warn-soft: #fff3df;
-  --bad: #e03131; --bad-soft: #ffe8e8; --info: #1c7ed6; --info-soft: #e3f1ff; --idle: #868e96; --idle-soft: #eef0f2;
-  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
-  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --bg: #f3f4f7; --panel: #ffffff; --line: #e1e4ea; --line-strong: #cfd4dd;
+  --text: #161b26; --muted: #454e5f; --faint: #6b7487;
+  --accent: #3451d1; --accent-soft: #e8ecff;
+  --ok: #23863a; --ok-soft: #e3f4e7; --warn: #b8650a; --warn-soft: #fff1dc;
+  --bad: #c92a2a; --bad-soft: #ffe6e6; --info: #1864ab; --info-soft: #e2f0fd; --idle: #5c6575; --idle-soft: #eceef2;
+  --floor: #ece6dc; --desk: #c99e6e; --desk-top: #d9b38a; --screen-off: #3a3f4a; --screen-on: #0f2a1d;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 2px 6px rgba(16,24,40,.06);
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --sans: "Pretendard Variable", Pretendard, "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #12151b; --panel: #1a1e26; --line: #2a303b; --text: #e6e9ef; --muted: #9aa3b5; --faint: #6c7486;
-    --accent: #7c95ff; --accent-soft: #232b45; --ok: #51cf66; --ok-soft: #1c3324; --warn: #ffa94d; --warn-soft: #3a2b14;
-    --bad: #ff6b6b; --bad-soft: #3d1d1f; --info: #4dabf7; --info-soft: #182c40; --idle: #9aa1ab; --idle-soft: #262b33;
+    --bg: #111419; --panel: #191d24; --line: #2b313c; --line-strong: #3a4250;
+    --text: #eef1f6; --muted: #c3cad6; --faint: #98a1b2;
+    --accent: #8da2ff; --accent-soft: #252e4d;
+    --ok: #63d47a; --ok-soft: #1b3424; --warn: #ffb35c; --warn-soft: #3b2b14;
+    --bad: #ff7b7b; --bad-soft: #3f1e20; --info: #6cb8ff; --info-soft: #172d44; --idle: #aab2bf; --idle-soft: #272c35;
+    --floor: #23211e; --desk: #6e5238; --desk-top: #85644a; --screen-off: #2a2e36; --screen-on: #0b2618;
     --shadow: none;
   }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
-body { background: var(--bg); color: var(--text); font: 14px/1.5 "Pretendard", "Malgun Gothic", system-ui, sans-serif; }
+body { background: var(--bg); color: var(--text); font: 15px/1.65 var(--sans); -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: anywhere; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--accent); }
 
+/* ---------- header ---------- */
 header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
-  display: flex; align-items: center; gap: 16px; padding: 10px 20px; flex-wrap: wrap; }
-.brand { font-weight: 700; font-size: 16px; letter-spacing: -.2px; }
-.brand small { color: var(--muted); font-weight: 500; margin-left: 6px; }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
-.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.pill.ok { background: var(--ok-soft); color: var(--ok); }
+  display: flex; align-items: center; gap: 18px; padding: 12px 24px; flex-wrap: wrap; }
+.brand { font-weight: 800; font-size: 18px; letter-spacing: -.3px; }
+.brand small { color: var(--faint); font-weight: 500; font-size: 14px; margin-left: 6px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border-radius: 999px; font-size: 14px; font-weight: 700; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.ok::before { animation: pulse 1.6s infinite; }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
 .pill.bad { background: var(--bad-soft); color: var(--bad); }
 .pill.idle { background: var(--idle-soft); color: var(--idle); }
-.meters { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
-.meter { min-width: 170px; font-size: 12px; color: var(--muted); }
-.meter .top { display: flex; justify-content: space-between; gap: 10px; }
-.meter .top small { color: var(--faint); font-size: 11px; }
-.meter .bar { height: 6px; border-radius: 3px; background: var(--idle-soft); overflow: hidden; margin-top: 3px; }
-.meter .bar i { display: block; height: 100%; background: var(--ok); }
+@keyframes pulse { 50% { opacity: .35; } }
+.meters { display: flex; gap: 22px; margin-left: auto; flex-wrap: wrap; }
+.meter { min-width: 210px; font-size: 14px; color: var(--muted); }
+.meter .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.meter b { color: var(--text); font-size: 15px; }
+.meter small { color: var(--faint); font-size: 12.5px; }
+.meter .bar { height: 7px; border-radius: 4px; background: var(--idle-soft); overflow: hidden; margin-top: 4px; }
+.meter .bar i { display: block; height: 100%; background: var(--ok); border-radius: 4px; }
 .meter.mid .bar i { background: var(--warn); } .meter.high .bar i { background: var(--bad); }
 
-main { padding: 16px 20px 40px; max-width: 1600px; margin: 0 auto; }
-.composer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 12px; margin-bottom: 16px; }
-.composer textarea { width: 100%; min-height: 44px; resize: vertical; border: none; outline: none; background: transparent; font-size: 15px; }
-.composer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; }
-.composer label { font-size: 12.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
-.composer select, .composer input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--bg); }
+main { padding: 20px 24px 48px; max-width: 1760px; margin: 0 auto; }
+.composer { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 20px; }
+.composer textarea { width: 100%; min-height: 52px; resize: vertical; border: none; outline: none; background: transparent; font-size: 16px; line-height: 1.6; }
+.composer textarea::placeholder { color: var(--faint); }
+.composer .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
+.composer label { font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.composer select, .composer input { border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 10px; background: var(--bg); font-size: 14px; }
+.hint { color: var(--faint); font-size: 13px; }
 
-.grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.4fr) minmax(320px, 1.1fr); gap: 16px; align-items: start; }
-@media (max-width: 1150px) { .grid { grid-template-columns: 1fr 1fr; } .feed-col { grid-column: 1 / -1; } }
-@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } header { padding: 10px 14px; } main { padding: 12px 14px 40px; } }
-
-section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
-.panel > h2 { margin: 0; font-size: 13.5px; font-weight: 700; padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
-.panel > h2 .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11.5px; }
+/* ---------- panels ---------- */
+section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+.panel > h2 { margin: 0; font-size: 16px; font-weight: 800; padding: 13px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; letter-spacing: -.2px; }
+.panel > h2 .count { background: var(--bad); color: #fff; border-radius: 999px; padding: 0 9px; font-size: 13px; line-height: 22px; }
 .panel > h2 .spacer { flex: 1; }
-.panel-body { padding: 12px 14px; }
-.empty { color: var(--faint); text-align: center; padding: 18px 0; font-size: 13px; }
-.stack > * + * { margin-top: 10px; }
+.panel > h2 .sub { color: var(--faint); font-weight: 500; font-size: 13.5px; }
+.panel-body { padding: 16px 18px; }
+.empty { color: var(--faint); text-align: center; padding: 24px 0; font-size: 15px; }
+.stack > * + * { margin-top: 14px; }
 
-.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
-.card.approval { border-left: 3px solid var(--warn); } .card.question { border-left: 3px solid var(--info); } .card.finished { border-left: 3px solid var(--ok); }
-.card .kind { font-size: 11.5px; font-weight: 700; letter-spacing: .3px; }
+.grid { display: grid; grid-template-columns: minmax(340px, 1fr) minmax(420px, 1.35fr) minmax(360px, 1.1fr); gap: 20px; align-items: start; margin-top: 20px; }
+@media (max-width: 1280px) { .grid { grid-template-columns: 1fr 1fr; } .feed-col { grid-column: 1 / -1; } }
+@media (max-width: 800px) { .grid { grid-template-columns: 1fr; } header, main { padding-left: 14px; padding-right: 14px; } .meters { margin-left: 0; } }
+
+/* ---------- office ---------- */
+.office { background:
+    linear-gradient(var(--floor), var(--floor)) padding-box;
+  padding: 22px 20px 26px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 26px 20px; }
+.desk { position: relative; cursor: default; }
+.desk.clickable { cursor: pointer; }
+.desk .screen { position: relative; margin: 0 auto; width: 88%; height: 112px; border-radius: 10px 10px 4px 4px; background: var(--screen-off);
+  border: 6px solid #2b2f36; padding: 10px 12px; color: #9ff2bf; font: 13px/1.5 var(--sans); overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,.18); }
+.desk.working .screen, .desk.reviewing .screen { background: var(--screen-on); }
+.desk .screen .task { color: #fff; font-weight: 700; font-size: 13.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.desk .screen .now { margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.desk .screen .off { color: #8b93a3; display: flex; height: 100%; align-items: center; justify-content: center; font-size: 15px; gap: 6px; }
+.desk .screen .cursor { display: inline-block; width: 7px; height: 14px; background: #9ff2bf; vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.desk .stand { width: 26px; height: 12px; background: #2b2f36; margin: 0 auto; }
+.desk .table { position: relative; height: 18px; border-radius: 6px; background: var(--desk-top); border-bottom: 8px solid var(--desk); box-shadow: 0 6px 10px rgba(0,0,0,.12); }
+.desk .keyboard { position: absolute; left: 50%; top: 3px; transform: translateX(-50%); width: 70px; height: 9px; border-radius: 3px; background: #e9ebef; }
+.desk.working .keyboard, .desk.reviewing .keyboard { animation: type .35s infinite alternate; }
+@keyframes type { to { background: #cfd4dc; } }
+.desk .mug { position: absolute; right: 16px; top: -12px; font-size: 18px; }
+.desk .person { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 0 4px; }
+.avatar { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 24px; flex: none; border: 3px solid var(--panel); box-shadow: 0 0 0 2px var(--line-strong); }
+.desk.working .avatar { box-shadow: 0 0 0 3px var(--ok); }
+.desk.reviewing .avatar { box-shadow: 0 0 0 3px var(--accent); }
+.person .name { font-weight: 800; font-size: 16px; line-height: 1.3; }
+.person .role { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding: 0 4px; }
+.badge { font-size: 12.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line-strong); color: var(--muted); }
+.badge.live { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.badge.rev { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.badge.queue { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+
+/* ---------- inbox cards ---------- */
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--panel); }
+.card.approval { border-left: 4px solid var(--warn); } .card.question { border-left: 4px solid var(--info); } .card.finished { border-left: 4px solid var(--ok); }
+.card .kind { font-size: 13px; font-weight: 800; }
 .card.approval .kind { color: var(--warn); } .card.question .kind { color: var(--info); } .card.finished .kind { color: var(--ok); }
-.card .title { font-weight: 600; margin: 2px 0 6px; }
-.card .meta { color: var(--muted); font-size: 12px; }
-.card pre, .prose pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.55 inherit; margin: 6px 0; }
-.card .actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
-.card textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--bg); resize: vertical; }
-.grant { display: inline-block; font-family: var(--mono); font-size: 12px; background: var(--warn-soft); color: var(--warn); border-radius: 4px; padding: 1px 6px; margin: 2px 4px 2px 0; }
-details.hire { margin-top: 6px; border: 1px dashed var(--line); border-radius: 6px; padding: 6px 8px; }
-details.hire summary { cursor: pointer; font-weight: 600; }
+.card .kind span { color: var(--faint); font-weight: 600; }
+.card .title { font-weight: 700; font-size: 16px; line-height: 1.5; margin: 4px 0 8px; }
+.card .meta { color: var(--muted); font-size: 14px; }
+.card .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+.card textarea, .notebox { width: 100%; min-height: 70px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 9px 11px; background: var(--bg); resize: vertical; font-size: 14.5px; line-height: 1.6; margin-top: 10px; }
+.grant { display: inline-block; font-family: var(--mono); font-size: 13px; background: var(--warn-soft); color: var(--warn); border-radius: 5px; padding: 2px 8px; margin: 3px 6px 3px 0; font-weight: 600; }
+details.hire { margin-top: 10px; border: 1px dashed var(--line-strong); border-radius: 8px; padding: 10px 12px; }
+details.hire summary { cursor: pointer; font-weight: 700; }
 
-.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
+.btn { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 8px; padding: 7px 16px; cursor: pointer; font-weight: 700; font-size: 14.5px; }
 .btn:hover { border-color: var(--faint); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.good { background: var(--ok); border-color: var(--ok); color: #fff; }
 .btn.danger { color: var(--bad); }
-.btn.small { padding: 2px 8px; font-size: 12px; }
-.btn:disabled { opacity: .5; cursor: default; }
+.btn.small { padding: 4px 11px; font-size: 13.5px; }
 
-.chip { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.chip { display: inline-block; font-size: 13px; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
 .s-running { background: var(--info-soft); color: var(--info); }
 .s-pending, .s-waiting { background: var(--idle-soft); color: var(--idle); }
 .s-review { background: var(--accent-soft); color: var(--accent); }
@@ -93,60 +140,77 @@ details.hire summary { cursor: pointer; font-weight: 600; }
 .s-failed { background: var(--bad-soft); color: var(--bad); }
 .s-canceled, .s-awaiting_approval { background: var(--idle-soft); color: var(--faint); }
 
-.goal { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.goal + .goal { margin-top: 10px; }
-.goal-head { padding: 9px 12px; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; }
+/* ---------- board ---------- */
+.goal { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.goal + .goal { margin-top: 14px; }
+.goal-head { padding: 12px 14px; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
 .goal-head:hover, .trow:hover { background: var(--bg); }
-.goal-head .title { font-weight: 600; }
+.goal-head .title { font-weight: 700; font-size: 16px; line-height: 1.45; }
 .goal-head > .chip, .trow > .chip { align-self: start; justify-self: end; }
-.tags { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); }
-.tags span { background: var(--bg); border-radius: 4px; padding: 0 6px; }
-.trow { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line); cursor: pointer; font-size: 13px; }
-.trow .id, .goal-head .id { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
-.trow .who { color: var(--muted); font-size: 12px; }
-.live { grid-column: 1 / -1; font-size: 12px; color: var(--info); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live::before { content: "▸ "; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.tags span { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; }
+.trow { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 10px 14px; border-top: 1px solid var(--line); cursor: pointer; font-size: 15px; line-height: 1.5; }
+.id { font-family: var(--mono); font-size: 12.5px; color: var(--faint); padding-top: 2px; }
+.trow .who { color: var(--muted); font-size: 13.5px; }
+.live { grid-column: 1 / -1; font-size: 13.5px; color: var(--info); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.live::before { content: "▶ "; font-size: 10px; vertical-align: 1px; }
 
-.feed { font-family: var(--mono); font-size: 12px; line-height: 1.6; height: calc(100vh - 230px); min-height: 320px; overflow-y: auto; padding: 8px 12px; }
-.feed div { white-space: pre-wrap; word-break: break-word; }
-.feed .t { color: var(--faint); }
-.feed .act { color: var(--muted); padding-left: 14px; }
-.feed .start { color: var(--accent); font-weight: 600; }
-.feed .alert { color: var(--bad); font-weight: 600; }
-.feed .note { color: var(--ok); }
-.feed .tid { cursor: pointer; text-decoration: underline dotted; }
+/* ---------- feed ---------- */
+.feed { font-size: 14px; line-height: 1.6; height: calc(100vh - 220px); min-height: 360px; overflow-y: auto; padding: 6px 0; }
+.feed .row { display: grid; grid-template-columns: 62px 1fr; gap: 10px; padding: 5px 16px; }
+.feed .row:hover { background: var(--bg); }
+.feed .t { font-family: var(--mono); font-size: 12px; color: var(--faint); padding-top: 2px; }
+.feed .msg { min-width: 0; }
+.feed .who { font-weight: 700; color: var(--text); margin-right: 6px; }
+.feed .act .msg { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.feed .act.open .msg { -webkit-line-clamp: unset; }
+.feed .start { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 9px; }
+.feed .start .msg { color: var(--accent); font-weight: 700; }
+.feed .alert .msg { color: var(--bad); font-weight: 700; }
+.feed .note .msg { color: var(--ok); font-weight: 600; }
+.feed code { font-family: var(--mono); font-size: 12.5px; background: var(--bg); padding: 0 4px; border-radius: 4px; }
+.tid { cursor: pointer; font-family: var(--mono); font-size: 12.5px; color: var(--accent); font-weight: 700; margin-right: 6px; }
 
-.side-list { font-size: 13px; }
-.side-list div { display: flex; gap: 8px; padding: 3px 0; }
-.side-list b { min-width: 110px; font-weight: 600; }
-.side-list span { color: var(--muted); }
+.side-list { font-size: 14px; }
+.side-list .item { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.side-list .item:last-child { border-bottom: none; }
+.side-list b { font-weight: 700; }
+.side-list .d { color: var(--muted); font-size: 13.5px; }
+.side-h { margin: 18px 0 4px; font-size: 14px; color: var(--muted); font-weight: 800; }
+.side-h:first-child { margin-top: 0; }
 
-dialog { border: none; border-radius: 12px; padding: 0; width: min(920px, 94vw); max-height: 90vh; background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.3); }
-dialog::backdrop { background: rgba(10,14,22,.45); }
-.dlg-head { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; position: sticky; top: 0; background: var(--panel); }
-.dlg-head h3 { margin: 0; font-size: 16px; flex: 1; }
-.dlg-body { padding: 14px 18px 20px; overflow-y: auto; max-height: calc(90vh - 60px); }
-.dlg-body h4 { margin: 18px 0 6px; font-size: 13px; color: var(--muted); }
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 12px 0 10px; }
-.tabs button { border: none; background: none; padding: 6px 10px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
+/* ---------- dialog ---------- */
+dialog { border: none; border-radius: 14px; padding: 0; width: min(980px, 95vw); max-height: 92vh; background: var(--panel); color: var(--text); box-shadow: 0 24px 70px rgba(0,0,0,.35); }
+dialog::backdrop { background: rgba(10,14,22,.55); }
+.dlg-head { padding: 16px 22px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: flex-start; }
+.dlg-head h3 { margin: 0; font-size: 19px; line-height: 1.45; flex: 1; letter-spacing: -.2px; }
+.dlg-body { padding: 16px 22px 24px; overflow-y: auto; max-height: calc(92vh - 70px); }
+.dlg-body h4 { margin: 20px 0 8px; font-size: 14.5px; color: var(--muted); font-weight: 800; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 14px; }
+.tabs button { border: none; background: none; padding: 8px 14px; cursor: pointer; color: var(--muted); border-bottom: 3px solid transparent; font-weight: 700; font-size: 15px; }
 .tabs button.on { color: var(--accent); border-color: var(--accent); }
-.loglist { font-size: 13px; }
-.loglist .entry { padding: 6px 0; border-bottom: 1px solid var(--line); }
-.loglist .entry .h { font-size: 12px; color: var(--muted); }
+.loglist .entry { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.loglist .entry .h { font-size: 13.5px; color: var(--muted); margin-bottom: 2px; }
 .loglist .entry .h b { color: var(--text); }
-.files { display: flex; gap: 6px; flex-wrap: wrap; }
-.mono { font-family: var(--mono); font-size: 12px; }
+.files { display: flex; gap: 8px; flex-wrap: wrap; }
+.actfeed { font-size: 14px; }
+.actfeed div { padding: 3px 0; border-bottom: 1px dashed var(--line); color: var(--muted); }
 
-.prose { font-size: 14px; line-height: 1.65; }
-.prose h1, .prose h2, .prose h3 { margin: 14px 0 6px; line-height: 1.3; } .prose h1 { font-size: 18px; } .prose h2 { font-size: 16px; } .prose h3 { font-size: 14.5px; }
-.prose code { font-family: var(--mono); font-size: 12.5px; background: var(--bg); padding: 0 4px; border-radius: 3px; }
-.prose pre { background: var(--bg); padding: 10px; border-radius: 6px; font-family: var(--mono); font-size: 12.5px; }
-.prose table { border-collapse: collapse; margin: 8px 0; font-size: 13px; display: block; overflow-x: auto; }
-.prose th, .prose td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
-.prose blockquote { margin: 6px 0; padding: 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
-.prose ul, .prose ol { padding-left: 22px; margin: 6px 0; }
+.prose { font-size: 15.5px; line-height: 1.8; max-width: 78ch; }
+.prose h1, .prose h2, .prose h3 { margin: 22px 0 8px; line-height: 1.4; letter-spacing: -.2px; }
+.prose h1 { font-size: 21px; } .prose h2 { font-size: 18px; } .prose h3 { font-size: 16.5px; }
+.prose p { margin: 8px 0; }
+.prose code { font-family: var(--mono); font-size: 13.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+.prose pre { background: var(--bg); padding: 12px 14px; border-radius: 8px; font: 13.5px/1.6 var(--mono); white-space: pre-wrap; }
+.prose table { border-collapse: collapse; margin: 12px 0; font-size: 14.5px; display: block; overflow-x: auto; }
+.prose th, .prose td { border: 1px solid var(--line-strong); padding: 7px 11px; text-align: left; vertical-align: top; }
+.prose th { background: var(--bg); }
+.prose blockquote { margin: 10px 0; padding: 4px 14px; border-left: 4px solid var(--line-strong); color: var(--muted); }
+.prose ul, .prose ol { padding-left: 24px; margin: 8px 0; }
+.prose li { margin: 3px 0; }
+.card .prose { font-size: 15px; line-height: 1.7; }
 
-#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-weight: 600; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
+#toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 20px; border-radius: 10px; font-weight: 700; font-size: 15px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
 #toast.show { opacity: 1; } #toast.err { background: var(--bad); color: #fff; }
 </style>
 </head>
@@ -165,9 +229,15 @@ dialog::backdrop { background: rgba(10,14,22,.45); }
       <label>프로젝트 <input id="goalProject" list="projects" placeholder="선택 사항" size="12"></label>
       <datalist id="projects"></datalist>
       <span style="flex:1"></span>
+      <span class="hint">Ctrl+Enter</span>
       <button class="btn primary" id="goalSubmit">목표 등록</button>
     </div>
   </div>
+
+  <section class="panel">
+    <h2>사무실 <span class="sub" id="officeSummary"></span></h2>
+    <div class="office" id="office"></div>
+  </section>
 
   <div class="grid">
     <div class="stack">
@@ -178,24 +248,21 @@ dialog::backdrop { background: rgba(10,14,22,.45); }
       <section class="panel">
         <h2>회사</h2>
         <div class="panel-body">
-          <div class="side-list" id="staff"></div>
-          <h4 style="margin:14px 0 4px;font-size:12.5px;color:var(--muted)">회사 기억</h4>
-          <div class="side-list" id="memory"></div>
-          <h4 style="margin:14px 0 4px;font-size:12.5px;color:var(--muted)">최근 7일 실행</h4>
-          <div class="side-list" id="runs"></div>
+          <div class="side-h">회사 기억</div><div class="side-list" id="memory"></div>
+          <div class="side-h">최근 7일 실행</div><div class="side-list" id="runs"></div>
         </div>
       </section>
     </div>
 
     <section class="panel">
       <h2>업무 현황 <span class="spacer"></span>
-        <label style="font-weight:500;font-size:12px;color:var(--muted)"><input type="checkbox" id="showDone"> 끝난 목표도 보기</label>
+        <label style="font-weight:600;font-size:14px;color:var(--muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="showDone"> 끝난 목표도 보기</label>
       </h2>
       <div class="panel-body" id="board"></div>
     </section>
 
     <section class="panel feed-col">
-      <h2>실시간 활동 <span class="spacer"></span><span id="feedState" class="mono" style="color:var(--faint);font-weight:500"></span></h2>
+      <h2>실시간 활동 <span class="spacer"></span><span id="feedState" class="sub"></span></h2>
       <div class="feed" id="feed"></div>
     </section>
   </div>
@@ -213,12 +280,16 @@ let state = null;
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const num = (id) => String(Number(String(id).slice(1)));
+const terminal = (s) => ['done', 'failed', 'canceled'].includes(s);
+const ago = (iso) => {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  return s < 60 ? `${s}초` : s < 3600 ? `${Math.round(s / 60)}분` : `${Math.round(s / 3600)}시간`;
+};
 
 function toast(msg, err) {
   const t = $('#toast');
   t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
-  clearTimeout(toast.h); toast.h = setTimeout(() => (t.className = ''), 2600);
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.className = ''), 2800);
 }
 
 async function api(path, body) {
@@ -236,31 +307,33 @@ async function act(id, action, body, okMsg) {
 }
 
 /* ---------- tiny markdown ---------- */
-function md(src) {
-  const lines = String(src ?? '').replace(/\r/g, '').split('\n');
-  const inline = (s) => esc(s)
+function inlineMd(s) {
+  return esc(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+}
+function md(src) {
+  const lines = String(src ?? '').replace(/\r/g, '').split('\n');
   let out = '', i = 0;
   while (i < lines.length) {
     const l = lines[i];
     if (/^```/.test(l)) { let b = ''; i++; while (i < lines.length && !/^```/.test(lines[i])) b += lines[i++] + '\n'; i++; out += `<pre>${esc(b)}</pre>`; continue; }
-    const h = /^(#{1,4})\s+(.*)$/.exec(l); if (h) { const n = Math.min(h[1].length, 3); out += `<h${n}>${inline(h[2])}</h${n}>`; i++; continue; }
+    const h = /^(#{1,4})\s+(.*)$/.exec(l); if (h) { const n = Math.min(h[1].length, 3); out += `<h${n}>${inlineMd(h[2])}</h${n}>`; i++; continue; }
     if (/^\|/.test(l)) {
       const rows = []; while (i < lines.length && /^\|/.test(lines[i])) rows.push(lines[i++]);
       const cells = (r) => r.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
       const body = rows.filter((r) => !/^\|[\s:|-]+\|$/.test(r));
-      out += '<table>' + body.map((r, k) => '<tr>' + cells(r).map((c) => k === 0 ? `<th>${inline(c)}</th>` : `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</table>';
+      out += '<table>' + body.map((r, k) => '<tr>' + cells(r).map((c) => k === 0 ? `<th>${inlineMd(c)}</th>` : `<td>${inlineMd(c)}</td>`).join('') + '</tr>').join('') + '</table>';
       continue;
     }
-    if (/^>\s?/.test(l)) { let b = []; while (i < lines.length && /^>\s?/.test(lines[i])) b.push(lines[i++].replace(/^>\s?/, '')); out += `<blockquote>${inline(b.join(' '))}</blockquote>`; continue; }
-    if (/^\s*[-*]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) b += `<li>${inline(lines[i++].replace(/^\s*[-*]\s+/, ''))}</li>`; out += `<ul>${b}</ul>`; continue; }
-    if (/^\s*\d+[.)]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) b += `<li>${inline(lines[i++].replace(/^\s*\d+[.)]\s+/, ''))}</li>`; out += `<ol>${b}</ol>`; continue; }
+    if (/^>\s?/.test(l)) { const b = []; while (i < lines.length && /^>\s?/.test(lines[i])) b.push(lines[i++].replace(/^>\s?/, '')); out += `<blockquote>${inlineMd(b.join(' '))}</blockquote>`; continue; }
+    if (/^\s*[-*]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) b += `<li>${inlineMd(lines[i++].replace(/^\s*[-*]\s+/, ''))}</li>`; out += `<ul>${b}</ul>`; continue; }
+    if (/^\s*\d+[.)]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) b += `<li>${inlineMd(lines[i++].replace(/^\s*\d+[.)]\s+/, ''))}</li>`; out += `<ol>${b}</ol>`; continue; }
     if (!l.trim()) { i++; continue; }
-    let p = []; while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\||>|\s*[-*]\s|\s*\d+[.)]\s)/.test(lines[i])) p.push(lines[i++]);
-    out += `<p>${p.map(inline).join('<br>')}</p>`;
+    const p = []; while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\||>|\s*[-*]\s|\s*\d+[.)]\s)/.test(lines[i])) p.push(lines[i++]);
+    out += `<p>${p.map(inlineMd).join('<br>')}</p>`;
   }
   return out;
 }
@@ -269,9 +342,9 @@ function md(src) {
 function renderHeader() {
   $('#company').textContent = state.company ? `· ${state.company}` : '';
   const e = state.engine, el = $('#engine');
-  if (e.halted) { el.className = 'pill bad'; el.textContent = '엔진 정지'; el.title = e.halted; }
+  if (e.halted) { el.className = 'pill bad'; el.textContent = '엔진 정지 — 확인 필요'; el.title = e.halted; }
   else if (!e.running) { el.className = 'pill idle'; el.textContent = '엔진 꺼짐'; el.title = 'npm start 로 켜세요'; }
-  else if (e.pausedUntil) { el.className = 'pill warn'; el.textContent = `휴식 중 · ${new Date(e.pausedUntil).toLocaleTimeString()}까지`; el.title = '사용량 한도'; }
+  else if (e.pausedUntil) { el.className = 'pill warn'; el.textContent = `휴식 중 · ${new Date(e.pausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}까지`; el.title = '사용량 한도'; }
   else { el.className = 'pill ok'; el.textContent = '가동 중'; el.title = ''; }
 
   const labels = { five_hour: '5시간 한도', seven_day: '주간 한도' };
@@ -279,11 +352,53 @@ function renderHeader() {
   $('#meters').innerHTML = Object.keys(w).length ? Object.entries(w).map(([k, v]) => {
     const pct = Math.round(v.utilization * 100);
     const cls = pct >= 80 ? 'high' : pct >= 50 ? 'mid' : '';
-    return `<div class="meter ${cls}" title="리셋 ${new Date(v.resetsAt * 1000).toLocaleString()}"><div class="top"><span>${labels[k] ?? k} <b>${pct}%</b></span>
-      <small>${new Date(v.resetsAt * 1000).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 리셋</small></div>
+    const reset = new Date(v.resetsAt * 1000).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return `<div class="meter ${cls}"><div class="top"><span>${labels[k] ?? k} <b>${pct}%</b></span><small>${reset} 리셋</small></div>
       <div class="bar"><i style="width:${Math.min(pct, 100)}%"></i></div></div>`;
-  }).join('') : '<div class="meter">구독 사용량: 직원이 한 번 일하면 표시됩니다</div>';
+  }).join('') : '<div class="meter">구독 사용량은 직원이 한 번 일하면 표시됩니다</div>';
 }
+
+/* ---------- office ---------- */
+const AVATARS = { ceo: ['👔', '#ffe8cc'], hr: ['📁', '#e5dbff'], reviewer: ['🔍', '#d0ebff'], worker: ['🔧', '#d3f9d8'] };
+const PALETTE = ['#ffe3e3', '#fff3bf', '#d3f9d8', '#d0ebff', '#e5dbff', '#ffdeeb', '#c3fae8', '#ffe8cc'];
+// Single-codepoint emoji only: ZWJ sequences (🧑‍💻) split into two glyphs on some Windows setups.
+const EMOJI = ['💼', '📊', '🧩', '📝', '🎯', '📦', '🧪', '🗃️'];
+function avatarOf(name) {
+  if (AVATARS[name]) return AVATARS[name];
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return [/dev|engineer|coder/.test(name) ? '💻' : /design/.test(name) ? '🎨' : /market/.test(name) ? '📣' : /writ|content/.test(name) ? '✍️' : /research|analy/.test(name) ? '📚' : EMOJI[h % EMOJI.length], PALETTE[h % PALETTE.length]];
+}
+
+function renderOffice() {
+  const desks = state.office;
+  const working = desks.filter((d) => d.state !== 'idle').length;
+  $('#officeSummary').textContent = `직원 ${desks.length}명 · 일하는 중 ${working}명`;
+  $('#office').innerHTML = desks.map((d) => {
+    const [emoji, bg] = avatarOf(d.name);
+    const run = d.runs[0];
+    const screen = run
+      ? `<div class="task">${run.kind === 'review' ? '🔍 검수: ' : ''}${esc(run.title)}</div>
+         <div class="now">${esc(run.activity ?? '시작하는 중')}<span class="cursor"></span></div>`
+      : `<div class="off">${d.queue ? '⏳ 차례 기다리는 중' : '☕ 대기 중'}</div>`;
+    const badges = [
+      run ? `<span class="badge ${run.kind === 'review' ? 'rev' : 'live'}">${run.kind === 'review' ? '검수 중' : '작업 중'} · ${ago(run.startedAt)}</span>` : '',
+      d.runs.length > 1 ? `<span class="badge live">+${d.runs.length - 1}건 동시</span>` : '',
+      d.queue ? `<span class="badge queue">대기 업무 ${d.queue}</span>` : '',
+      d.waiting ? `<span class="badge">보류 ${d.waiting}</span>` : '',
+      `<span class="badge">완료 ${d.done}</span>`,
+    ].join('');
+    return `<div class="desk ${d.state}${run ? ' clickable' : ''}" ${run ? `data-open="${run.taskId}"` : ''} title="${esc(d.description)}">
+      <div class="screen">${screen}</div>
+      <div class="stand"></div>
+      <div class="table"><div class="keyboard"></div><span class="mug">${d.state === 'idle' ? '☕' : ''}</span></div>
+      <div class="person"><div class="avatar" style="background:${bg}">${emoji}</div>
+        <div style="min-width:0"><div class="name">${esc(d.name)} <span class="badge" style="vertical-align:2px">${esc(d.model ?? '-')}</span></div>
+        <div class="role">${esc(d.description)}</div></div></div>
+      <div class="badges">${badges}</div>
+    </div>`;
+  }).join('') || '<div class="empty">직원이 없습니다</div>';
+}
+$('#office').addEventListener('click', (ev) => { const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open); });
 
 /* ---------- inbox ---------- */
 function renderInbox() {
@@ -294,15 +409,15 @@ function renderInbox() {
   let h = '';
   for (const a of approvals) {
     h += `<div class="card approval" data-id="${a.id}">
-      <div class="kind">결재 요청 · ${a.id} · ${esc(a.assignee)}</div>
+      <div class="kind">결재 요청 <span>· ${a.id} · ${esc(a.assignee)}</span></div>
       <div class="title">${esc(a.what)}</div>
-      ${a.grants.length ? `<div class="meta">요청 권한: ${a.grants.map((g) => `<span class="grant">${esc(g)}</span>`).join('')}</div>` : ''}
-      ${a.hires.map((p) => `<details class="hire"><summary>채용안: ${esc(p.name)} (${esc(p.model ?? '-')})</summary>
-        <div class="meta" style="margin:6px 0">${esc(p.description)}</div>
+      ${a.grants.length ? `<div class="meta">요청 권한<br>${a.grants.map((g) => `<span class="grant">${esc(g)}</span>`).join('')}</div>` : ''}
+      ${a.hires.map((p) => `<details class="hire"><summary>채용안 보기: ${esc(p.name)} (${esc(p.model ?? '-')})</summary>
+        <div class="meta" style="margin:8px 0">${esc(p.description)}</div>
         <div class="meta">도구: ${esc(p.tools.join(', ') || '전체')}</div>
         <div class="meta">추가 권한: ${p.permissions.length ? p.permissions.map((g) => `<span class="grant">${esc(g)}</span>`).join('') : '없음'}</div>
-        <div class="prose" style="margin-top:8px">${md(p.body.replace(/^---[\s\S]*?\n---\n/, ''))}</div></details>`).join('')}
-      <textarea placeholder="메모 또는 반려 사유 (반려 시 필수)"></textarea>
+        <div class="prose" style="margin-top:10px">${md(p.body.replace(/^---[\s\S]*?\n---\n/, ''))}</div></details>`).join('')}
+      <textarea placeholder="메모 또는 반려 사유 (반려할 때는 꼭 적어 주세요)"></textarea>
       <div class="actions">
         <button class="btn good" data-act="approve">승인</button>
         <button class="btn danger" data-act="deny">반려</button>
@@ -311,7 +426,7 @@ function renderInbox() {
   }
   for (const q of questions) {
     h += `<div class="card question" data-id="${q.id}">
-      <div class="kind">질문 · ${q.id} · ${esc(q.assignee)}</div>
+      <div class="kind">질문 <span>· ${q.id} · ${esc(q.assignee)}</span></div>
       <div class="title">${esc(q.title)}</div>
       <div class="prose">${md(q.question)}</div>
       <textarea placeholder="답변을 적으세요. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
@@ -320,7 +435,7 @@ function renderInbox() {
   }
   for (const f of finished) {
     h += `<div class="card finished" data-id="${f.id}">
-      <div class="kind">${f.status === 'done' ? '목표 완료' : '목표 실패'} · ${f.id}</div>
+      <div class="kind">${f.status === 'done' ? '목표 완료' : '목표 실패'} <span>· ${f.id}</span></div>
       <div class="title">${esc(f.title)}</div>
       <div class="actions"><button class="btn primary" data-open="${f.id}">결과 보기</button>
         <button class="btn" data-act="ack">확인 완료</button></div></div>`;
@@ -344,12 +459,11 @@ function renderBoard() {
   const tasks = state.tasks, byParent = {};
   for (const t of tasks) (byParent[t.parent ?? 'root'] ??= []).push(t);
   const showDone = $('#showDone').checked;
-  const terminal = (t) => ['done', 'failed', 'canceled'].includes(t.status);
-  const goals = (byParent.root ?? []).filter((g) => showDone || !terminal(g) || !g.acknowledged)
-    .sort((a, b) => terminal(a) - terminal(b) || b.id.localeCompare(a.id));
+  const goals = (byParent.root ?? []).filter((g) => showDone || !terminal(g.status) || !g.acknowledged)
+    .sort((a, b) => terminal(a.status) - terminal(b.status) || b.id.localeCompare(a.id));
   const chip = (t) => `<span class="chip s-${t.status}">${esc(t.label)}</span>`;
   const rows = (pid, depth) => (byParent[pid] ?? []).map((t) => `
-    <div class="trow" data-open="${t.id}" style="padding-left:${12 + depth * 16}px">
+    <div class="trow" data-open="${t.id}" style="padding-left:${14 + depth * 20}px">
       <span class="id">${t.id}</span><span>${esc(t.title)} <span class="who">· ${esc(t.assignee)}</span></span>${chip(t)}
       ${t.activity ? `<div class="live">${esc(t.activity)}</div>` : ''}
     </div>${rows(t.id, depth + 1)}`).join('');
@@ -357,20 +471,19 @@ function renderBoard() {
     <div class="goal">
       <div class="goal-head" data-open="${g.id}">
         <div><span class="id">${g.id}</span> <span class="title">${esc(g.title)}</span></div>${chip(g)}
-        <div class="tags"><span>${esc(g.assignee)}</span>${g.project ? `<span>프로젝트 ${esc(g.project)}</span>` : ''}${g.workspace ? `<span>작업 공간 ${esc(g.workspace)}</span>` : ''}<span>${new Date(g.created_at).toLocaleString()}</span></div>
+        <div class="tags"><span>${esc(g.assignee)}</span>${g.project ? `<span>프로젝트 ${esc(g.project)}</span>` : ''}${g.workspace ? `<span>작업 공간 ${esc(g.workspace)}</span>` : ''}<span>${new Date(g.created_at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>
         ${g.activity ? `<div class="live">${esc(g.activity)}</div>` : ''}
       </div>${rows(g.id, 0)}
-    </div>`).join('') : '<div class="empty">진행 중인 목표가 없습니다. 위에서 목표를 등록하세요.</div>';
+    </div>`).join('') : '<div class="empty">진행 중인 목표가 없습니다.<br>위에서 목표를 등록하세요.</div>';
 }
 $('#board').addEventListener('click', (ev) => { const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open); });
 $('#showDone').addEventListener('change', renderBoard);
 
 /* ---------- side ---------- */
 function renderSide() {
-  $('#staff').innerHTML = state.agents.map((a) => `<div><b>${esc(a.name)}</b><span>${esc(a.model ?? '-')} · ${esc(a.description)}</span></div>`).join('') || '<div class="empty">직원 없음</div>';
-  $('#memory').innerHTML = state.memory.map((m) => `<div><b>${esc(m.topic)}</b><span>${esc(m.title)} (${m.entries})</span></div>`).join('') || '<span style="color:var(--faint)">아직 없음</span>';
+  $('#memory').innerHTML = state.memory.map((m) => `<div class="item"><b>${esc(m.title)}</b> <span class="d">· ${m.entries}건</span></div>`).join('') || '<div class="d">아직 없습니다</div>';
   const r = state.runs;
-  $('#runs').innerHTML = r.total ? `<div><b>합계</b><span>${r.total}회</span></div>` + Object.entries(r.byAgent).map(([k, v]) => `<div><b>${esc(k)}</b><span>${v}회</span></div>`).join('') : '<span style="color:var(--faint)">아직 없음</span>';
+  $('#runs').innerHTML = r.total ? `<div class="item"><b>합계 ${r.total}회</b></div>` + Object.entries(r.byAgent).map(([k, v]) => `<div class="item">${esc(k)} <span class="d">· ${v}회</span></div>`).join('') : '<div class="d">아직 없습니다</div>';
   const ws = $('#goalWorkspace'), cur = ws.value;
   ws.innerHTML = '<option value="">없음</option>' + state.workspaces.map((w) => `<option${w === cur ? ' selected' : ''}>${esc(w)}</option>`).join('');
   $('#projects').innerHTML = [...new Set(state.tasks.map((t) => t.project).filter(Boolean))].map((p) => `<option value="${esc(p)}">`).join('');
@@ -381,14 +494,14 @@ async function openTask(id) {
   let d;
   try { d = await api(`/api/task/${id}`); } catch (e) { return toast(e.message, true); }
   const t = d.task;
-  $('#dlgTitle').innerHTML = `<span class="mono" style="color:var(--faint)">${t.id}</span> ${esc(t.title)}`;
+  $('#dlgTitle').innerHTML = `<span class="id">${t.id}</span> ${esc(t.title)}`;
   const entries = d.log.trim().split(/\n(?=- \S+ \[)/).filter(Boolean).reverse().map((e) => {
     const m = /^- (\S+) \[([^\]]+)\] ([^:\n]+)(?::\s?)?([\s\S]*)$/.exec(e);
     if (!m) return `<div class="entry">${esc(e)}</div>`;
     const body = m[4].split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n').trim();
     return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(body)}</div>` : ''}</div>`;
   }).join('');
-  const open = !['done', 'failed', 'canceled'].includes(t.status);
+  const open = !terminal(t.status);
   $('#dlgBody').innerHTML = `
     <div class="tags" style="gap:8px">
       <span class="chip s-${t.status}">${esc(t.label)}</span><span>담당 ${esc(t.assignee)}</span><span>지시 ${esc(t.created_by)}</span>
@@ -396,15 +509,18 @@ async function openTask(id) {
       ${t.project ? `<span>프로젝트 ${esc(t.project)}</span>` : ''}${t.workspace ? `<span>작업 공간 ${esc(t.workspace)}</span>` : ''}
       <span>시도 ${t.attempts}/${t.max_attempts}</span><span>반려 ${t.rejections}/${t.max_rejections}</span>
     </div>
-    ${d.children.length ? `<h4>하위 업무</h4>${d.children.map((c) => `<div class="trow" data-open="${c.id}"><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}` : ''}
+    ${d.children.length ? `<h4>하위 업무</h4><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${d.children.map((c, k) => `<div class="trow" data-open="${c.id}" ${k === 0 ? 'style="border-top:none"' : ''}><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}</div>` : ''}
     <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
     <div data-pane="brief" class="prose">${md(d.body)}</div>
-    <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint)">${(o.size / 1024).toFixed(1)}KB</span></button>`).join('')}</div><div id="fileView" class="prose" style="margin-top:12px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
+    <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint);font-weight:500">${(o.size / 1024).toFixed(1)}KB</span></button>`).join('')}</div><div id="fileView" class="prose" style="margin-top:16px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
     <div data-pane="log" hidden class="loglist">${entries}</div>
-    <div data-pane="act" hidden class="feed" style="height:auto;max-height:50vh">${d.activity.length ? d.activity.map((l) => `<div>${esc(l)}</div>`).join('') : '<div class="empty">기록 없음</div>'}</div>
+    <div data-pane="act" hidden class="actfeed">${d.activity.length ? d.activity.map((l) => {
+      const m = /^(\S+) \[([^\]]+)\] (.*)$/.exec(l);
+      return m ? `<div><span class="id">${new Date(m[1]).toLocaleTimeString()}</span> <b style="color:var(--text)">${esc(m[2])}</b> ${esc(m[3])}</div>` : `<div>${esc(l)}</div>`;
+    }).join('') : '<div class="empty">기록 없음</div>'}</div>
     <h4>사용자 메모 · 조치</h4>
-    <textarea id="dlgNote" style="width:100%;min-height:50px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--bg)" placeholder="코멘트나 취소 사유"></textarea>
-    <div class="actions" style="display:flex;gap:6px;margin-top:6px">
+    <textarea id="dlgNote" class="notebox" placeholder="코멘트나 취소 사유"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn" id="dlgComment">코멘트 남기기</button>
       ${open ? '<button class="btn danger" id="dlgCancel">이 업무 취소</button>' : ''}
     </div>`;
@@ -426,8 +542,7 @@ async function openTask(id) {
   if (!dlg.open) dlg.showModal();
   if (d.outputs.length && ['done', 'failed'].includes(t.status)) {
     body.querySelector('[data-tab="out"]').click();
-    const report = body.querySelector('[data-file="report.md"]') ?? body.querySelector('[data-file]');
-    report?.click();
+    (body.querySelector('[data-file="report.md"]') ?? body.querySelector('[data-file]'))?.click();
   }
 }
 
@@ -445,38 +560,56 @@ $('#goalText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.
 /* ---------- live feed ---------- */
 const feed = $('#feed');
 function addFeed(line) {
-  const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
   const m = /^\[([^\]]+)\]\s(.*)$/.exec(line);
-  const time = m ? m[1].replace(/^.*?(\d{1,2}:\d{2}:\d{2})$/, '$1') : '';
-  const text = m ? m[2] : line;
+  const time = m ? (/(\d{1,2}:\d{2}):\d{2}\s*$/.exec(m[1])?.[1] ?? '') : '';
+  let text = (m ? m[2] : line).trim();
+  let kind = '', html;
+  const a = /^(T\d{4}) (\S+) ▸ (.*)$/.exec(text);
+  if (a) {
+    kind = 'act';
+    const body = a[3].replace(/^💬\s*/, '💬 ');
+    html = `<span class="tid" data-open="${a[1]}">${a[1]}</span><span class="who">${esc(a[2])}</span>${esc(body)}`;
+  } else {
+    kind = /실행 시작|검수 시작/.test(text) ? 'start' : /^!!!|정지|오류|→ 실패/.test(text) ? 'alert' : /^알림:|→ 완료|검수 → 완료|^웹:/.test(text) ? 'note' : '';
+    html = esc(text).replace(/\b(T\d{4})\b/, '<span class="tid" data-open="$1">$1</span>');
+  }
   const div = document.createElement('div');
-  const cls = /^\s+T\d+ .* ▸ /.test(text) ? 'act' : /실행 시작|검수 시작/.test(text) ? 'start' : /^!!!|정지|오류|실패/.test(text) ? 'alert' : /알림:|완료|웹:/.test(text) ? 'note' : '';
-  if (cls) div.className = cls;
-  div.innerHTML = `<span class="t">${esc(time)}</span> ` + esc(text.trim()).replace(/\b(T\d{4})\b/g, '<span class="tid" data-open="$1">$1</span>');
+  div.className = `row ${kind}`;
+  div.innerHTML = `<span class="t">${esc(time)}</span><span class="msg">${html}</span>`;
   feed.appendChild(div);
-  while (feed.childElementCount > 400) feed.firstChild.remove();
+  while (feed.childElementCount > 500) feed.firstChild.remove();
   if (near) feed.scrollTop = feed.scrollHeight;
 }
-feed.addEventListener('click', (ev) => { const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open); });
+feed.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-open]'); if (el) return openTask(el.dataset.open);
+  const row = ev.target.closest('.row.act'); if (row) row.classList.toggle('open');
+});
 
 function connect() {
   const es = new EventSource('/api/events');
-  es.addEventListener('log', (e) => addFeed(JSON.parse(e.data)));
+  es.addEventListener('log', (e) => {
+    const line = JSON.parse(e.data);
+    addFeed(line);
+    // Keep the office monitors in step with what employees are doing.
+    if (line.includes(' ▸ ')) { clearTimeout(connect.t); connect.t = setTimeout(refresh, 700); }
+  });
   es.addEventListener('changed', () => refresh());
-  es.onopen = () => ($('#feedState').textContent = '연결됨');
+  es.onopen = () => ($('#feedState').textContent = '● 연결됨');
   es.onerror = () => { $('#feedState').textContent = '재연결 중…'; };
 }
 
 async function refresh() {
   try {
     state = await api('/api/state');
-    renderHeader(); renderInbox(); renderBoard(); renderSide();
-    document.title = (state.inbox.approvals.length + state.inbox.questions.length ? `(${state.inbox.approvals.length + state.inbox.questions.length}) ` : '') + 'BusinessFactory';
+    renderHeader(); renderOffice(); renderInbox(); renderBoard(); renderSide();
+    const pending = state.inbox.approvals.length + state.inbox.questions.length;
+    document.title = (pending ? `(${pending}) ` : '') + 'BusinessFactory';
   } catch (e) { $('#engine').className = 'pill bad'; $('#engine').textContent = '서버 연결 끊김'; }
 }
 
 refresh(); connect();
-setInterval(refresh, 15000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>

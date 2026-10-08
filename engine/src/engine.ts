@@ -32,7 +32,15 @@ interface ActiveRun {
   kind: RunKind;
   agent: string;
   workspace: string | null;
+  startedAt: string;
   promise: Promise<void>;
+}
+
+export interface ActiveRunInfo {
+  taskId: string;
+  kind: RunKind;
+  agent: string;
+  startedAt: string;
 }
 
 /** System folders whose change during a run means an employee escaped its sandbox. */
@@ -73,6 +81,11 @@ export class Engine {
 
   get halted(): string | null {
     return this.haltReason;
+  }
+
+  /** Who is working on what right now (for the web console's office view). */
+  activeRuns(): ActiveRunInfo[] {
+    return [...this.active.values()].map(({ taskId, kind, agent, startedAt }) => ({ taskId, kind, agent, startedAt }));
   }
 
   get pausedUntilTime(): Date | null {
@@ -251,7 +264,14 @@ export class Engine {
 
     const spec = this.buildSpec(task, kind, agent);
     spec.onEvent = (ev) => this.onRunEvent(task.id, agent.name, ev);
-    const entry: ActiveRun = { taskId: task.id, kind, agent: agent.name, workspace: task.workspace, promise: Promise.resolve() };
+    const entry: ActiveRun = {
+      taskId: task.id,
+      kind,
+      agent: agent.name,
+      workspace: task.workspace,
+      startedAt: this.now().toISOString(),
+      promise: Promise.resolve(),
+    };
     entry.promise = this.run(spec)
       .then((result) => this.handleResult(task.id, kind, agent, result))
       .catch((err) => {
