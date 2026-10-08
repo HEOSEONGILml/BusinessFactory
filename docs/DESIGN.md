@@ -146,7 +146,7 @@ awaiting_approval ──승인──▶ pending ──▶ running ──done─�
 | `bf task done <id> --summary ...` | 완료 보고 |
 | `bf task ask <id> "<질문>"` / `bf task answer <id> "<답>"` | 질문/답변 |
 | `bf task pass <id>` / `bf task reject <id> "<사유>"` | 검수 통과/반려 |
-| `bf task comment <id> "<내용>"` | 로그에 코멘트 |
+| `bf task comment <id> "<내용>" [--item <번호>]` | 로그에 코멘트. 사용자가 처리할 일에 달면 그 스레드에 들어가고 담당자가 답한다 |
 | `bf task cancel <id>` | 취소 (하위 업무 포함) |
 | `bf status` / `bf agents` / `bf usage` | 회사 현황 / 직원 목록 / 사용량 요약 |
 | `bf engine [--once]` | 엔진 실행 |
@@ -235,6 +235,14 @@ claude -p --agents <정의.json> --agent <직원> --output-format json
   3. 사용자가 `bf approve`하면 `staff/`로 옮기고 커밋한다.
   4. 사용자가 `bf deny`하면 채용안을 폐기한다.
 - 사용자 창구: `bf inbox`에서 결재 대기, 사용자에게 온 질문, 끝난 목표(`bf ack`로 확인 처리)를 한 번에 본다.
+- **사용자 업무**: 가입·외부 문의·키 발급처럼 사용자만 할 수 있는 일은 직원이 `bf task create --to owner`로 하위 업무로 맡긴다(질문으로 묶으면 업무 전체가 멈추기 때문).
+  - 엔진은 실행하지 않고, 검수도 없다. 처리할 일에 "내가 할 일"로 뜬다. 코멘트에는 맡긴 직원이 답한다.
+  - 사용자가 완료 보고(`bf task done`, 웹 "완료 보고")를 하면 끝나고, "할 수 없음"은 사유와 함께 취소된다. 다른 하위 업무와 똑같이 `--depends`와 상위 재기상 규칙을 따른다.
+  - 최상위 목표로는 만들 수 없고, 위임 깊이 제한을 받지 않는다.
+- **코멘트 스레드**: 처리할 일(질문은 건마다)에는 코멘트를 계속 달 수 있다. 코멘트는 이야기일 뿐 처리가 아니다.
+  - 저장: `board/<id>/thread.jsonl`. 이력(`log.md`)에도 `코멘트`로 남는다.
+  - 사용자가 코멘트를 달면 엔진이 담당자를 읽기 전용 실행으로 바로 깨우고, 최종 출력을 코멘트로 단다. 대화용 실행과 같은 `chat.max_concurrency` 자리를 쓴다. 커서(`.thread-cursors.json`)로 같은 코멘트에 두 번 답하지 않는다.
+  - 처리는 따로 한다. 답변 확정(코멘트 전체가 답변으로 넘어감), 승인·반려, 확인 완료, 취소를 하면 그 스레드는 비워진다.
 
 ## 8-1. 사용자 창구
 

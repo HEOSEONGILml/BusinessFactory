@@ -83,6 +83,13 @@ function reply(result: string, extra: Record<string, unknown> = {}) {
   );
 }
 
+if (prompt.startsWith('[코멘트]')) {
+  // Reply to the owner's comment on an inbox item: the final output is the comment.
+  const last = prompt.split('\n---\n')[1]?.trim().split('\n\n').pop() ?? '';
+  reply(`${agent} 확인: ${last.replace(/^\[[^\]]+\] /, '')}`);
+  process.exit(0);
+}
+
 if (chatId) {
   // Messenger mode: the final message is the reply. Plan key "chat:<agent>".
   const mode = plan[`chat:${agent}`] ?? 'say';

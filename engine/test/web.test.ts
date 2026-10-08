@@ -86,6 +86,35 @@ describe('웹 화면', () => {
     assert.deepEqual(board.read(a.id).task.grants, ['Bash(npx vercel deploy:*)']);
   });
 
+  it('처리할 일에 코멘트를 달면 스레드에 쌓이고, 업무는 그대로 기다린다', async () => {
+    const q = board.createTask('owner', { title: '코멘트 목표', assignee: 'ceo', doneWhen: ['x'], parent: null });
+    board.start(q.id);
+    board.ask('ceo', q.id, '이름을 정해 주세요');
+    assert.equal((await post(`/api/task/${q.id}/thread`, { text: '후보를 보여 주세요' })).status, 200);
+    assert.equal((await post(`/api/task/${q.id}/thread`, { text: '짧은 이름이면 좋겠어요' })).status, 200);
+    const state = await (await fetch(BASE + '/api/state')).json();
+    const card = state.inbox.questions.find((x: { id: string }) => x.id === q.id);
+    assert.deepEqual(card.thread.map((e: { text: string }) => e.text), ['후보를 보여 주세요', '짧은 이름이면 좋겠어요']);
+    assert.equal(state.owner, 'owner');
+    assert.equal(board.read(q.id).task.status, 'blocked');
+    assert.equal((await post(`/api/task/${q.id}/thread`, { text: ' ' })).status, 400);
+  });
+
+  it('업무 상세는 하위 업무 전체와 그 이력을 함께 준다', async () => {
+    const g = board.createTask('owner', { title: '트리 목표', assignee: 'ceo', doneWhen: ['x'], parent: null });
+    board.start(g.id);
+    const c = board.createTask('ceo', { title: '하위', assignee: 'worker', doneWhen: ['x'], parent: g.id });
+    board.start(c.id);
+    const gc = board.createTask('worker', { title: '손자', assignee: 'owner', doneWhen: ['x'], parent: c.id });
+    const d = await (await fetch(`${BASE}/api/task/${g.id}`)).json();
+    assert.deepEqual(d.tree.map((t: { id: string; depth: number }) => [t.id, t.depth]), [[c.id, 1], [gc.id, 2]]);
+    assert.match(d.tree[1].log, /생성: 담당: owner/);
+    const state = await (await fetch(BASE + '/api/state')).json();
+    assert.ok(state.inbox.mine.some((m: { id: string; assignee: string }) => m.id === gc.id && m.assignee === 'worker'));
+    assert.equal((await post(`/api/task/${gc.id}/finish`, { text: '했습니다' })).status, 200);
+    assert.equal(board.read(gc.id).task.status, 'done');
+  });
+
   it('규칙 위반은 이유와 함께 400', async () => {
     const r = await post('/api/task/T0001/deny', { reason: '' });
     assert.equal(r.status, 400);

@@ -214,3 +214,126 @@ describe('엔진', () => {
     assert.equal(t.attempts, 0);
   });
 });
+
+describe('처리할 일 코멘트', () => {
+  function asked(board: Engine['board'], items: string[] = []) {
+    const g = goal(board, '질문 목표');
+    board.start(g.id);
+    board.ask('ceo', g.id, items.length ? '' : '도메인은 무엇으로 할까요?', true, items);
+    return g.id;
+  }
+
+  it('사용자가 코멘트를 달면 담당자가 바로 코멘트로 답하고, 업무는 그대로 질문 대기다', async () => {
+    const { engine, board, calls, notices } = setup({});
+    const id = asked(board);
+    board.threadPost('owner', id, '후보를 몇 개 보여 주세요');
+    await engine.runUntilIdle();
+
+    const thread = board.thread(id);
+    assert.deepEqual(thread.map((e) => [e.from, e.text]), [
+      ['owner', '후보를 몇 개 보여 주세요'],
+      ['ceo', 'ceo 확인: 후보를 몇 개 보여 주세요'],
+    ]);
+    assert.equal(board.read(id).task.status, 'blocked');
+    const run = calls().find((c) => c.prompt.startsWith('[코멘트]'))!;
+    assert.equal(run.agent, 'ceo');
+    assert.ok(!run.args.join(' ').includes('Edit('), '코멘트 답변은 읽기 전용');
+    assert.ok(notices.some((n) => n.title.startsWith(`코멘트 · ${id}`)));
+
+    // 새 코멘트가 없으면 다시 답하지 않는다
+    await engine.runUntilIdle();
+    assert.equal(board.thread(id).length, 2);
+    board.threadPost('owner', id, '.com 으로 갑시다');
+    await engine.runUntilIdle();
+    assert.equal(board.thread(id).length, 4);
+  });
+
+  it('답변 확정 때 코멘트 전체가 답변으로 넘어가고 스레드는 비워진다', () => {
+    const { board } = setup({});
+    const id = asked(board);
+    board.threadPost('owner', id, '후보를 보여 주세요');
+    board.threadPost('ceo', id, 'a.com, b.com 이 있습니다');
+    board.answer('owner', id, '');
+    assert.equal(board.read(id).task.status, 'pending');
+    assert.deepEqual(board.thread(id), []);
+    assert.match(board.readLog(id), /답변: 코멘트로 나눈 내용:[\s\S]*\*\*사용자\*\*: 후보를 보여 주세요[\s\S]*\*\*ceo\*\*: a\.com, b\.com/);
+    assert.throws(() => board.threadPost('owner', id, '늦은 코멘트'), /처리할 일이 아닙니다/);
+  });
+
+  it('질문이 여러 건이면 건마다 따로 이야기하고 따로 확정한다', async () => {
+    const { engine, board } = setup({});
+    const id = asked(board, ['가입', '결제']);
+    board.threadPost('owner', id, '가입은 어디서요?', 1);
+    await engine.runUntilIdle();
+    assert.equal(board.thread(id, 1).length, 2);
+    assert.equal(board.thread(id, 2).length, 0);
+    board.answer('owner', id, '가입했습니다', 1);
+    assert.equal(board.thread(id).length, 0);
+    assert.throws(() => board.threadPost('owner', id, 'x', 1), /처리할 일이 아닙니다/);
+    board.threadPost('owner', id, '결제는 다음 주에', 2);
+    assert.equal(board.read(id).task.status, 'blocked');
+  });
+
+  it('결재와 끝난 목표에도 코멘트를 달 수 있고, 결정하면 스레드가 닫힌다', () => {
+    const { board } = setup({});
+    const a = goal(board, '결재 목표');
+    board.start(a.id);
+    board.requestApproval('ceo', a.id, '도메인 구매', []);
+    board.threadPost('owner', a.id, '얼마예요?');
+    board.approve('owner', a.id, '', () => {});
+    assert.deepEqual(board.thread(a.id), []);
+
+    const t = goal(board, '진행 중 목표');
+    assert.throws(() => board.threadPost('owner', t.id, '어때요?'), /처리할 일이 아닙니다/);
+    assert.throws(() => board.threadPost('worker', a.id, '끼어들기'), /사용자와 ceo 만/);
+  });
+});
+
+describe('사용자 업무', () => {
+  function delegated(board: Engine['board']) {
+    const g = goal(board, '운영 인수');
+    board.start(g.id);
+    const signup = board.createTask('ceo', { title: '콘솔 가입', assignee: 'owner', doneWhen: ['appName 을 알려 준다'], parent: g.id });
+    const ask = board.createTask('ceo', { title: '토스 문의', assignee: 'owner', doneWhen: ['답변 원문'], dependsOn: [signup.id], parent: g.id });
+    const dev = board.createTask('ceo', { title: '미니앱 전환', assignee: 'worker', doneWhen: ['빌드 통과'], parent: g.id });
+    return { g, signup, ask, dev };
+  }
+
+  it('엔진은 사용자 업무를 실행하지 않고, 그동안 다른 하위 업무는 진행된다', async () => {
+    const { engine, board, calls } = setup({ worker: 'done', reviewer: 'pass' });
+    const { g, signup, dev } = delegated(board);
+    board.finishRun(g.id, '위임');
+    await engine.runUntilIdle();
+    assert.equal(board.read(dev.id).task.status, 'done');
+    assert.equal(board.read(signup.id).task.status, 'pending');
+    assert.equal(board.read(signup.id).task.review, false);
+    assert.equal(board.read(g.id).task.status, 'waiting');
+    assert.ok(!calls().some((c) => c.task === signup.id));
+  });
+
+  it('사용자가 코멘트를 달면 맡긴 직원이 답하고, 완료 보고로 끝내면 상위가 깨어난다', async () => {
+    const { engine, board } = setup({ worker: 'done', reviewer: 'pass' });
+    const { g, signup, ask, dev } = delegated(board);
+    board.finishRun(g.id, '위임');
+    board.threadPost('owner', signup.id, '앱 유형은 게임이 맞나요?');
+    await engine.runUntilIdle();
+    assert.deepEqual(board.thread(signup.id).map((e) => e.from), ['owner', 'ceo']);
+    assert.throws(() => board.done('ceo', signup.id, '대신 끝냄'), /담당자는 owner/);
+
+    board.done('owner', signup.id, 'appName blindcandle');
+    assert.equal(board.read(signup.id).task.status, 'done');
+    assert.match(board.readLog(signup.id), /완료보고: 코멘트로 나눈 내용:[\s\S]*게임이 맞나요[\s\S]*\*\*사용자 \(최종\)\*\*: appName blindcandle/);
+    assert.deepEqual(board.thread(signup.id), []);
+    board.cancel('owner', ask.id, '토스 문의는 하지 않기로');
+    assert.equal(board.read(dev.id).task.status, 'done');
+    assert.equal(board.read(g.id).task.status, 'pending');
+  });
+
+  it('사용자 업무는 하위 업무로만 만들 수 있다', () => {
+    const { board } = setup({});
+    assert.throws(
+      () => board.createTask('owner', { title: 'x', assignee: 'owner', doneWhen: ['x'], parent: null }),
+      /하위 업무로만/,
+    );
+  });
+});

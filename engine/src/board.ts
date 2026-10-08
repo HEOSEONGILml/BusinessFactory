@@ -88,6 +88,16 @@ export interface Question {
   answer: string | null;
 }
 
+/** One comment in an owner inbox item's thread (board/<id>/thread.jsonl). */
+export interface ThreadEntry {
+  n: number;
+  at: string;
+  from: string;
+  text: string;
+  /** Which of several questions it is about (null: the item as a whole). */
+  item: number | null;
+}
+
 export interface Approval {
   kind: 'action' | 'hire';
   what: string;
@@ -196,7 +206,7 @@ export class Board {
     const all = this.list();
     const byId = new Map(all.map((t) => [t.id, t]));
     return all
-      .filter((t) => t.status === 'pending')
+      .filter((t) => t.status === 'pending' && !this.isOwnerTask(t))
       .filter((t) => t.depends_on.every((d) => byId.get(d)?.status === 'done'))
       .sort((a, b) => this.effectivePriority(b) - this.effectivePriority(a) || a.id.localeCompare(b.id));
   }
@@ -211,7 +221,10 @@ export class Board {
       if (doneWhen.length === 0) {
         throw new BoardError('완료 조건(--done-when)이 없는 업무는 만들 수 없습니다.');
       }
-      if (!listAgents(this.paths).some((a) => a.name === input.assignee)) {
+      // The owner can be given work too (sign-ups, payments, outside contact): it waits in the inbox.
+      const forOwner = input.assignee === this.config.owner;
+      if (forOwner && input.parent === null) throw new BoardError('사용자 업무는 하위 업무로만 만들 수 있습니다.');
+      if (!forOwner && !listAgents(this.paths).some((a) => a.name === input.assignee)) {
         throw new BoardError(`존재하지 않는 직원입니다: ${input.assignee}`);
       }
 
@@ -228,7 +241,7 @@ export class Board {
         if (isTerminal(parent.status)) {
           throw new BoardError(`${parent.id} 는 이미 종료된 업무입니다.`);
         }
-        if (parent.depth + 1 > this.config.max_depth) {
+        if (!forOwner && parent.depth + 1 > this.config.max_depth) {
           throw new BoardError(
             `위임 깊이 한도(${this.config.max_depth})를 넘습니다. 직접 수행하거나 상위에 보고하세요.`,
           );
@@ -252,7 +265,7 @@ export class Board {
         depends_on: dependsOn,
         depth: parent ? parent.depth + 1 : 0,
         // Whatever reaches the owner is always reviewed.
-        review: parent === null ? true : (input.review ?? true),
+        review: parent === null ? true : forOwner ? false : (input.review ?? true),
         workspace: input.workspace ?? parent?.workspace ?? null,
         project: input.project ?? parent?.project ?? null,
         priority: input.priority ?? parent?.priority ?? 0,
@@ -302,6 +315,14 @@ export class Board {
     return this.locked(() => {
       const doc = this.read(id);
       this.requireAssignee(actor, doc.task);
+      const ownerTask = this.isOwnerTask(doc.task);
+      if (ownerTask) {
+        // Never run by the engine: the owner reports it done straight from the inbox.
+        this.requireStatus(doc.task, 'pending');
+        summary = this.withThread(id, null, summary);
+        if (!summary.trim()) throw new BoardError('한 일이나 결과를 적어 주세요.');
+        this.transition(doc, 'running');
+      }
       this.requireStatus(doc.task, 'running');
       if (!summary.trim()) throw new BoardError('완료 요약(--summary)이 필요합니다.');
       const open = this.children(id).filter((c) => !isTerminal(c.status));
@@ -313,6 +334,7 @@ export class Board {
       }
       this.transition(doc, doc.task.review ? 'review' : 'done');
       this.save(doc);
+      if (ownerTask) this.clearThread(id);
       this.log(id, actor, '완료보고', summary);
       if (doc.task.status === 'done') this.settleParent(doc.task);
       return doc.task;
@@ -366,10 +388,15 @@ export class Board {
       if (actor !== this.config.owner && actor !== doc.task.ask_to) {
         throw new BoardError(`이 질문은 ${doc.task.ask_to} 에게 온 것입니다.`);
       }
-      if (!text.trim()) throw new BoardError('답변 내용이 비어 있습니다.');
       const qs = doc.task.questions;
+      if (qs?.length && item === undefined) {
+        throw new BoardError(`${id} 에는 질문이 ${qs.length}건 있습니다. 몇 번째 질문에 답하는지 정해 주세요 (--item).`);
+      }
+      const key = qs?.length ? item! : null;
+      text = this.withThread(id, key, text);
+      if (!text.trim()) throw new BoardError('답변 내용이 비어 있습니다.');
+      this.clearThread(id, key);
       if (qs?.length) {
-        if (item === undefined) throw new BoardError(`${id} 에는 질문이 ${qs.length}건 있습니다. 몇 번째 질문에 답하는지 정해 주세요 (--item).`);
         const q = qs.find((x) => x.id === item);
         if (!q) throw new BoardError(`${id} 에 ${item}번 질문은 없습니다.`);
         q.answer = text.trim();
@@ -433,6 +460,7 @@ export class Board {
       doc.task.ask_to = null;
       this.transition(doc, 'pending');
       this.save(doc);
+      this.clearThread(id);
       this.log(id, actor, '결재승인', [approval.what, note].filter(Boolean).join(' — '));
       return doc.task;
     });
@@ -448,6 +476,7 @@ export class Board {
       doc.task.ask_to = null;
       this.transition(doc, 'pending');
       this.save(doc);
+      this.clearThread(id);
       this.log(id, actor, '결재반려', `${approval.what} — ${reason}`);
       return doc.task;
     });
@@ -461,6 +490,7 @@ export class Board {
       if (!isTerminal(doc.task.status)) throw new BoardError(`${id} 는 아직 끝나지 않았습니다.`);
       doc.task.acknowledged = true;
       this.save(doc);
+      this.clearThread(id);
       this.log(id, actor, '확인', '');
       return doc.task;
     });
@@ -498,6 +528,75 @@ export class Board {
     });
   }
 
+  /**
+   * Whether the task sits in the owner's inbox: a question or approval for the owner,
+   * or a finished goal not yet acknowledged. Only these have comment threads.
+   */
+  isOwnerTask(task: Task): boolean {
+    return task.assignee === this.config.owner;
+  }
+
+  /** Who answers the owner's comments: the assignee, or for the owner's own tasks whoever handed them out. */
+  responder(task: Task): string {
+    return this.isOwnerTask(task) ? task.created_by : task.assignee;
+  }
+
+  awaitsOwner(task: Task, item: number | null = null): boolean {
+    if (this.isOwnerTask(task)) return item === null && task.status === 'pending';
+    if (task.status === 'blocked' && task.ask_to === this.config.owner) {
+      if (item === null) return !task.questions?.length;
+      return !!task.questions?.some((q) => q.id === item && q.answer === null);
+    }
+    return item === null && task.parent === null && isTerminal(task.status) && !task.acknowledged && task.status !== 'canceled';
+  }
+
+  thread(id: string, item?: number | null): ThreadEntry[] {
+    const file = path.join(this.taskDir(id), 'thread.jsonl');
+    if (!fs.existsSync(file)) return [];
+    const all = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as ThreadEntry);
+    return item === undefined ? all : all.filter((e) => e.item === item);
+  }
+
+  /**
+   * A comment on an inbox item. It only adds to the discussion: answering, approving and
+   * acknowledging stay separate decisions. The owner's comments wake the assignee to reply.
+   */
+  threadPost(actor: string, id: string, text: string, item: number | null = null): ThreadEntry {
+    return this.locked(() => {
+      const doc = this.read(id);
+      const responder = this.responder(doc.task);
+      if (actor !== this.config.owner && actor !== responder) {
+        throw new BoardError(`${id} 의 코멘트는 사용자와 ${responder} 만 달 수 있습니다.`);
+      }
+      if (!this.awaitsOwner(doc.task, item)) throw new BoardError(`${id}${item ? ` ${item}번 질문` : ''} 은(는) 처리할 일이 아닙니다.`);
+      if (!text.trim()) throw new BoardError('코멘트 내용이 비어 있습니다.');
+      const prev = this.thread(id);
+      const entry: ThreadEntry = { n: (prev.at(-1)?.n ?? 0) + 1, at: this.timestamp(), from: actor, text: text.trim(), item };
+      fs.appendFileSync(path.join(this.taskDir(id), 'thread.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+      this.save(doc); // updated_at moves, so open consoles refresh
+      this.log(id, actor, item ? `코멘트 ${item}/${doc.task.questions!.length}` : '코멘트', text);
+      return entry;
+    });
+  }
+
+  /** The answer the assignee gets: the whole discussion, then the owner's closing words. */
+  private withThread(id: string, item: number | null, text: string): string {
+    const entries = this.thread(id, item);
+    if (entries.length === 0) return text;
+    const owner = this.config.owner;
+    const lines = entries.map((e) => `**${e.from === owner ? '사용자' : e.from}**: ${e.text}`);
+    if (text.trim()) lines.push(`**사용자 (최종)**: ${text.trim()}`);
+    return ['코멘트로 나눈 내용:', '', ...lines].join('\n\n');
+  }
+
+  private clearThread(id: string, item?: number | null): void {
+    const file = path.join(this.taskDir(id), 'thread.jsonl');
+    if (!fs.existsSync(file)) return;
+    const keep = item === undefined ? [] : this.thread(id).filter((e) => e.item !== item);
+    if (keep.length === 0) fs.rmSync(file);
+    else writeFileAtomic(file, keep.map((e) => JSON.stringify(e) + '\n').join(''));
+  }
+
   comment(actor: string, id: string, text: string): void {
     this.locked(() => {
       this.read(id);
@@ -531,6 +630,7 @@ export class Board {
       cancelTree(id);
       this.transition(doc, 'canceled');
       this.save(doc);
+      this.clearThread(id);
       this.log(id, actor, '취소', reason);
       this.settleParent(doc.task);
       return doc.task;

@@ -112,7 +112,7 @@ section.panel { background: var(--panel); border: 1px solid var(--line); border-
 
 /* ---------- inbox cards ---------- */
 .card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--panel); }
-.card.approval { border-left: 4px solid var(--warn); } .card.question { border-left: 4px solid var(--info); } .card.finished { border-left: 4px solid var(--ok); }
+.card.approval { border-left: 4px solid var(--warn); } .card.mine { border-left: 4px solid var(--accent); } .card.mine .kind { color: var(--accent); } .card.question { border-left: 4px solid var(--info); } .card.finished { border-left: 4px solid var(--ok); }
 .card .kind { font-size: 13px; font-weight: 800; }
 .card.approval .kind { color: var(--warn); } .card.question .kind { color: var(--info); } .card.finished .kind { color: var(--ok); }
 .card .kind span { color: var(--faint); font-weight: 600; }
@@ -192,6 +192,13 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .loglist .entry { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .loglist .entry .h { font-size: 13.5px; color: var(--muted); margin-bottom: 2px; }
 .loglist .entry .h b { color: var(--text); }
+.loglist .entry.by-owner { border-left: 3px solid var(--info); padding-left: 10px; }
+.loglist .entry.by-engine { opacity: .7; }
+.loglist .entry .h a.id { text-decoration: none; }
+.loglist .prose.clamp { max-height: 15em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.loglist .more { margin-top: 4px; }
+.logopts { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13.5px; color: var(--muted); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.logopts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .files { display: flex; gap: 8px; flex-wrap: wrap; }
 .actfeed { font-size: 14px; }
 .actfeed div { padding: 3px 0; border-bottom: 1px dashed var(--line); color: var(--muted); }
@@ -219,6 +226,14 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .thumb.loading { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
 .thumb button { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 13px; line-height: 20px; padding: 0; }
 .card .attach { margin-top: 8px; }
+/* ---------- inbox comment threads ---------- */
+.thread { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.cmt { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--bg); }
+.cmt.me { border-left: 3px solid var(--info); }
+.cmt .h { font-size: 12.5px; color: var(--faint); margin-bottom: 2px; }
+.cmt .h b { color: var(--muted); }
+.cmt.typing { color: var(--muted); font-size: 13.5px; border-style: dashed; }
+.card .hint { color: var(--faint); font-size: 12.5px; }
 .drop-on { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .att { display: inline-block; margin: 4px 6px 4px 0; vertical-align: top; }
 .att img { max-width: min(320px, 100%); max-height: 240px; border-radius: 8px; border: 1px solid var(--line); display: block; }
@@ -606,11 +621,11 @@ function renderOffice() {
     const [emoji, bg] = avatarOf(d.name);
     const run = d.runs[0];
     const screen = run
-      ? `<div class="task">${run.kind === 'review' ? '🔍 검수: ' : run.kind === 'chat' ? '💬 ' : ''}${esc(run.title)}</div>
+      ? `<div class="task">${run.kind === 'review' ? '🔍 검수: ' : run.kind === 'chat' || run.kind === 'comment' ? '💬 ' : ''}${esc(run.title)}</div>
          <div class="now">${esc(run.activity ?? '시작하는 중')}<span class="cursor"></span></div>`
       : `<div class="off">${d.queue ? '⏳ 차례 기다리는 중' : '☕ 대기 중'}</div>`;
     const badges = [
-      run ? `<span class="badge ${{ review: 'rev', chat: 'talk' }[run.kind] ?? 'live'}">${{ review: '검수 중', chat: '대화 중' }[run.kind] ?? '작업 중'} · ${ago(run.startedAt)}</span>` : '',
+      run ? `<span class="badge ${{ review: 'rev', chat: 'talk', comment: 'talk' }[run.kind] ?? 'live'}">${{ review: '검수 중', chat: '대화 중', comment: '코멘트 중' }[run.kind] ?? '작업 중'} · ${ago(run.startedAt)}</span>` : '',
       d.runs.length > 1 ? `<span class="badge live">+${d.runs.length - 1}건 동시</span>` : '',
       d.queue ? `<span class="badge queue">대기 업무 ${d.queue}</span>` : '',
       d.waiting ? `<span class="badge">보류 ${d.waiting}</span>` : '',
@@ -634,11 +649,34 @@ $('#office').addEventListener('click', (ev) => {
 });
 
 /* ---------- inbox ---------- */
+// Comments on an inbox item. Talking only: answering, approving and acknowledging stay separate buttons.
+function threadUI(x) {
+  const when = (iso) => new Date(iso).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const items = x.thread.map((e) => {
+    const me = e.from === state.owner;
+    return `<div class="cmt${me ? ' me' : ''}"><div class="h"><b>${me ? '나' : esc(e.from)}</b> · ${when(e.at)}</div><div class="prose">${md(tidy(e.text))}</div></div>`;
+  });
+  if (x.thread.at(-1)?.from === state.owner) {
+    items.push(`<div class="cmt typing">💬 ${esc(x.assignee)} ${x.replying ? '이(가) 코멘트를 쓰고 있습니다…' : '이(가) 곧 확인합니다 (엔진이 켜져 있어야 합니다)'}</div>`);
+  }
+  return items.length ? `<div class="thread">${items.join('')}</div>` : '';
+}
+async function postComment(card) {
+  const id = card.dataset.id, item = card.dataset.item ? Number(card.dataset.item) : null;
+  const key = `i:${id}:${card.dataset.item ?? ''}`, ta = card.querySelector('textarea');
+  if (uploading(key)) return toast('이미지를 올리는 중입니다', true);
+  const full = withAttachments(ta.value.trim(), key);
+  if (!full) return toast('코멘트를 적어 주세요', true);
+  try { await api(`/api/task/${id}/thread`, { text: full, item }); }
+  catch (e) { return toast(e.message, true); }
+  ta.value = ''; clearAttachments(key);
+  await refresh();
+}
 function renderInbox() {
-  const { approvals, questions, finished } = state.inbox;
-  const n = approvals.length + questions.filter((q) => q.answered === null || q.answered === undefined).length + finished.length;
+  const { approvals, mine, questions, finished } = state.inbox;
+  const n = approvals.length + mine.length + questions.filter((q) => q.answered === null || q.answered === undefined).length + finished.length;
   const c = $('#inboxCount'); c.hidden = !n; c.textContent = n;
-  if (!n) { $('#inbox').innerHTML = '<div class="empty">처리할 일이 없습니다 🎉</div>'; return; }
+  if (!n) { $('#inbox').innerHTML = '<div class="empty">처리할 일이 없습니다 🎉</div>'; delete $('#inbox').dataset.html; return; }
   let h = '';
   for (const a of approvals) {
     h += `<div class="card approval" data-id="${a.id}">
@@ -650,12 +688,29 @@ function renderInbox() {
         <div class="meta">도구: ${esc(p.tools.join(', ') || '전체')}</div>
         <div class="meta">추가 권한: ${p.permissions.length ? p.permissions.map((g) => `<span class="grant">${esc(g)}</span>`).join('') : '없음'}</div>
         <div class="prose" style="margin-top:10px">${md(p.body.replace(/^---[\s\S]*?\n---\n/, ''))}</div></details>`).join('')}
-      <textarea placeholder="메모 또는 반려 사유 (반려할 때는 꼭 적어 주세요)"></textarea>
+      ${threadUI(a)}
+      <textarea placeholder="코멘트를 달면 ${esc(a.assignee)} 이(가) 바로 확인하고 코멘트로 답합니다. 승인 메모나 반려 사유로도 씁니다 (반려할 때는 꼭 적어 주세요)."></textarea>
+      ${attachUI(`i:${a.id}:`)}
       <div class="actions">
+        <button class="btn" data-act="comment">코멘트 달기</button>
         <button class="btn good" data-act="approve">승인</button>
         <button class="btn danger" data-act="deny">반려</button>
         <span style="flex:1"></span><button class="btn small" data-open="${a.id}">자세히</button>
       </div></div>`;
+  }
+  for (const m of mine) {
+    h += `<div class="card mine" data-id="${m.id}">
+      <div class="kind">내가 할 일 <span>· ${m.id} · ${esc(m.assignee)} 요청${m.parent ? ` · ${m.parent} 하위` : ''}</span></div>
+      <div class="title">${esc(m.title)}</div>
+      ${m.waitingOn.length ? `<div class="meta">⏳ 먼저 끝낼 일: ${m.waitingOn.map((d) => `<a href="#" data-open="${d}">${d}</a>`).join(', ')}</div>` : ''}
+      <details class="hire"${m.thread.length ? '' : ' open'}><summary>할 일 보기</summary><div class="prose" style="margin-top:8px">${md(tidy(m.body))}</div></details>
+      ${threadUI(m)}
+      <textarea placeholder="궁금한 점을 코멘트로 달면 ${esc(m.assignee)} 이(가) 바로 답합니다. 다 하셨으면 결과를 적고 '완료 보고'를 누르세요. 비밀값은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
+      ${attachUI(`i:${m.id}:`)}
+      <div class="actions"><button class="btn" data-act="comment">코멘트 달기</button>
+        <button class="btn primary" data-act="finish" title="적은 내용(과 지금까지의 코멘트)을 완료 보고로 남깁니다">완료 보고</button>
+        <button class="btn danger" data-act="cancel" title="적은 사유와 함께 이 일을 취소합니다. ${esc(m.assignee)} 이(가) 다른 방법을 찾습니다">할 수 없음</button>
+        <span style="flex:1"></span><button class="btn small" data-open="${m.id}">자세히</button></div></div>`;
   }
   for (const q of questions) {
     const part = q.item ? ` · ${q.item}/${q.total}건` : '';
@@ -665,37 +720,78 @@ function renderInbox() {
       <div class="prose">${md(tidy(q.question))}</div>
       ${q.answered !== null && q.answered !== undefined
         ? `<div class="meta" style="margin-top:8px">✅ 답변함 <span class="hint">— 나머지 건에 모두 답하면 직원이 다시 일을 시작합니다</span></div><div class="prose">${md(q.answered)}</div>`
-        : `<textarea placeholder="이 건에 대한 답변. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요. 이미지는 붙여 넣거나 끌어다 놓아도 됩니다."></textarea>
-      ${attachUI(`q:${q.id}:${q.item ?? ''}`)}
-      <div class="actions"><button class="btn primary" data-act="answer">답변 보내기</button>
+        : `${threadUI(q)}
+      <textarea placeholder="코멘트를 달면 ${esc(q.assignee)} 이(가) 바로 확인하고 코멘트로 답합니다. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요. 이미지는 붙여 넣거나 끌어다 놓아도 됩니다."></textarea>
+      ${attachUI(`i:${q.id}:${q.item ?? ''}`)}
+      <div class="actions"><button class="btn" data-act="comment">코멘트 달기</button>
+        <button class="btn primary" data-act="answer" title="지금까지의 코멘트(와 입력 중인 내용)를 답변으로 넘기고 업무를 다시 시작합니다">답변 확정 · 업무 재개</button>
         <span style="flex:1"></span><button class="btn small" data-open="${q.id}">자세히</button></div>`}</div>`;
   }
   for (const f of finished) {
     h += `<div class="card finished" data-id="${f.id}">
       <div class="kind">${f.status === 'done' ? '목표 완료' : '목표 실패'} <span>· ${f.id}</span></div>
       <div class="title">${esc(f.title)}</div>
-      <div class="actions"><button class="btn primary" data-open="${f.id}">결과 보기</button>
+      ${threadUI(f)}
+      <textarea placeholder="결과에 대해 코멘트를 달면 ${esc(f.assignee)} 이(가) 바로 확인하고 코멘트로 답합니다."></textarea>
+      ${attachUI(`i:${f.id}:`)}
+      <div class="actions"><button class="btn" data-act="comment">코멘트 달기</button>
+        <button class="btn primary" data-open="${f.id}">결과 보기</button>
         <button class="btn" data-act="ack">확인 완료</button></div></div>`;
   }
-  $('#inbox').innerHTML = h;
+  // 5초마다·변경 이벤트마다 다시 그리므로, 쓰던 답변과 커서·펼침 상태를 보존한다.
+  const box = $('#inbox');
+  if (box.dataset.html === h) return;
+  const keyOf = (card) => `${card.className}|${card.dataset.id}|${card.dataset.item ?? ''}`;
+  const drafts = new Map(), opened = new Set();
+  let focus = null;
+  box.querySelectorAll('.card').forEach((card) => {
+    const ta = card.querySelector('textarea');
+    if (ta?.value) drafts.set(keyOf(card), ta.value);
+    if (ta && ta === document.activeElement) focus = { key: keyOf(card), start: ta.selectionStart, end: ta.selectionEnd, dir: ta.selectionDirection, scroll: ta.scrollTop };
+    card.querySelectorAll('details').forEach((d, i) => { if (d.open) opened.add(`${keyOf(card)}#${i}`); });
+  });
+  box.innerHTML = h; box.dataset.html = h;
+  box.querySelectorAll('.card').forEach((card) => {
+    const ta = card.querySelector('textarea'), k = keyOf(card);
+    if (ta && drafts.has(k)) ta.value = drafts.get(k);
+    card.querySelectorAll('details').forEach((d, i) => { if (opened.has(`${k}#${i}`)) d.open = true; });
+    if (ta && focus?.key === k) { ta.focus({ preventScroll: true }); ta.setSelectionRange(focus.start, focus.end, focus.dir); ta.scrollTop = focus.scroll; }
+  });
 }
 
 $('#inbox').addEventListener('click', (ev) => {
-  const b = ev.target.closest('button'); if (!b) return;
+  const b = ev.target.closest('button, a[data-open]'); if (!b) return;
   const card = b.closest('.card'), id = card?.dataset.id;
-  if (b.dataset.open) return openTask(b.dataset.open);
+  if (b.dataset.open) { ev.preventDefault(); return openTask(b.dataset.open); }
   const text = card.querySelector('textarea')?.value.trim() ?? '';
   if (b.dataset.act === 'approve') act(id, 'approve', { note: text }, '승인했습니다');
   if (b.dataset.act === 'deny') { if (!text) return toast('반려 사유를 적어 주세요', true); act(id, 'deny', { reason: text }, '반려했습니다'); }
+  if (b.dataset.act === 'comment') return postComment(card);
   if (b.dataset.act === 'answer') {
-    const key = `q:${id}:${card.dataset.item}`;
+    const key = `i:${id}:${card.dataset.item}`;
     if (uploading(key)) return toast('이미지를 올리는 중입니다', true);
     const full = withAttachments(text, key);
-    if (!full) return toast('답변을 적어 주세요', true);
+    if (!full && !card.querySelector('.cmt')) return toast('답변이나 코멘트를 적어 주세요', true);
     const item = card.dataset.item ? Number(card.dataset.item) : undefined;
     act(id, 'answer', { text: full, item }, '답변을 보냈습니다').then(() => clearAttachments(key));
   }
   if (b.dataset.act === 'ack') act(id, 'ack', {}, '확인 처리했습니다');
+  if (b.dataset.act === 'finish' || b.dataset.act === 'cancel') {
+    const key = `i:${id}:`;
+    if (uploading(key)) return toast('이미지를 올리는 중입니다', true);
+    const full = withAttachments(text, key);
+    if (b.dataset.act === 'cancel') {
+      if (!full) return toast('할 수 없는 이유를 적어 주세요', true);
+      return act(id, 'cancel', { reason: full }, '취소했습니다').then(() => clearAttachments(key));
+    }
+    if (!full && !card.querySelector('.cmt')) return toast('한 일이나 결과를 적어 주세요', true);
+    act(id, 'finish', { text: full }, '완료 보고했습니다').then(() => clearAttachments(key));
+  }
+});
+// Ctrl+Enter (⌘+Enter) posts a comment.
+$('#inbox').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' || !(ev.ctrlKey || ev.metaKey) || ev.target.tagName !== 'TEXTAREA') return;
+  ev.preventDefault(); postComment(ev.target.closest('.card'));
 });
 
 /* ---------- board ---------- */
@@ -734,17 +830,45 @@ function renderSide() {
 }
 
 /* ---------- task detail ---------- */
-async function openTask(id) {
+/* History entries of one task: [{at, actor, event, body, task}] */
+function parseLog(log, task) {
+  return log.trim().split(/\n(?=- \S+ \[)/).filter(Boolean).map((e) => {
+    const m = /^- (\S+) \[([^\]]+)\] ([^:\n]+)(?::\s?)?([\s\S]*)$/.exec(e);
+    if (!m) return { at: '', actor: '', event: '', body: e, task };
+    return { at: m[1], actor: m[2], event: m[3], body: m[4].split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n').trim(), task };
+  });
+}
+// Engine bookkeeping (run started/ended, permission denials) is noise when reading what people did.
+const ENGINE_ACTORS = new Set(['engine', 'system']);
+function renderLog(d, withTree, hideEngine) {
+  const own = { id: d.task.id, title: d.task.title };
+  let list = parseLog(d.log, own);
+  if (withTree) for (const c of d.tree) list.push(...parseLog(c.log, c));
+  if (hideEngine) list = list.filter((e) => !ENGINE_ACTORS.has(e.actor));
+  list.sort((a, b) => b.at.localeCompare(a.at));
+  if (!list.length) return '<div class="empty">기록 없음</div>';
+  return list.map((e) => {
+    const where = e.task.id !== own.id ? `<a href="#" class="id" data-open="${e.task.id}">${e.task.id}</a> <span class="who">${esc(e.task.title)}</span> · ` : '';
+    const long = e.body.length > 700 || e.body.split('\n').length > 12;
+    const body = e.body ? `<div class="prose${long ? ' clamp' : ''}">${md(tidy(e.body))}</div>${long ? '<button class="btn small more">더 보기</button>' : ''}` : '';
+    const kind = e.actor === state.owner ? ' by-owner' : ENGINE_ACTORS.has(e.actor) ? ' by-engine' : '';
+    return `<div class="entry${kind}"><div class="h">${where}${e.at ? new Date(e.at).toLocaleString() : ''} · <b>${esc(e.actor === state.owner ? '나' : e.actor)}</b> · ${esc(e.event)}</div>${body}</div>`;
+  }).join('');
+}
+
+// Back button inside the dialog: where we came from when following a link to another task.
+let dlgTrail = [];
+async function openTask(id, from) {
   let d;
   try { d = await api(`/api/task/${id}`); } catch (e) { return toast(e.message, true); }
+  if (!dlg.open) dlgTrail = [];
+  if (from && from !== id) dlgTrail.push(from);
   const t = d.task;
-  $('#dlgTitle').innerHTML = `<span class="id">${t.id}</span> ${esc(t.title)}`;
-  const entries = d.log.trim().split(/\n(?=- \S+ \[)/).filter(Boolean).reverse().map((e) => {
-    const m = /^- (\S+) \[([^\]]+)\] ([^:\n]+)(?::\s?)?([\s\S]*)$/.exec(e);
-    if (!m) return `<div class="entry">${esc(e)}</div>`;
-    const body = m[4].split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n').trim();
-    return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(tidy(body))}</div>` : ''}</div>`;
-  }).join('');
+  const back = dlgTrail.at(-1);
+  $('#dlgTitle').innerHTML = `${back ? `<button class="btn small" id="dlgBack" title="${back} 로 돌아가기">← ${back}</button> ` : ''}<span class="id">${t.id}</span> ${esc(t.title)}`;
+  if (back) $('#dlgBack').onclick = () => { dlgTrail.pop(); openTask(back); };
+  const prefs = (() => { try { return JSON.parse(localStorage.getItem('bf-log') ?? '{}'); } catch { return {}; } })();
+  const withTree = d.tree.length > 0 && prefs.tree !== false, hideEngine = prefs.engine !== true;
   const open = !terminal(t.status);
   $('#dlgBody').innerHTML = `
     <div class="tags" style="gap:8px">
@@ -753,11 +877,17 @@ async function openTask(id) {
       ${t.project ? `<span>프로젝트 ${esc(t.project)}</span>` : ''}${t.workspace ? `<span>작업 공간 ${esc(t.workspace)}</span>` : ''}
       <span>시도 ${t.attempts}/${t.max_attempts}</span><span>반려 ${t.rejections}/${t.max_rejections}</span>
     </div>
-    ${d.children.length ? `<h4>하위 업무</h4><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${d.children.map((c, k) => `<div class="trow" data-open="${c.id}" ${k === 0 ? 'style="border-top:none"' : ''}><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}</div>` : ''}
+    ${d.tree.length ? `<h4>하위 업무 ${d.tree.length}건</h4><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${d.tree.map((c, k) => `<div class="trow" data-open="${c.id}" style="padding-left:${14 + (c.depth - 1) * 20}px${k === 0 ? ';border-top:none' : ''}"><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee === state.owner ? '나' : c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}</div>` : ''}
     <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
     <div data-pane="brief" class="prose">${md(d.body)}</div>
     <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint);font-weight:500">${(o.size / 1024).toFixed(1)}KB</span></button>`).join('')}</div><div id="fileView" class="prose" style="margin-top:16px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
-    <div data-pane="log" hidden class="loglist">${entries}</div>
+    <div data-pane="log" hidden>
+      <div class="logopts">
+        ${d.tree.length ? `<label><input type="checkbox" id="logTree"${withTree ? ' checked' : ''}> 하위 업무 ${d.tree.length}건 이력 함께 보기</label>` : ''}
+        <label><input type="checkbox" id="logEngine"${hideEngine ? '' : ' checked'}> 엔진 기록 보기 (실행 시작·종료, 권한 거부)</label>
+      </div>
+      <div class="loglist">${renderLog(d, withTree, hideEngine)}</div>
+    </div>
     <div data-pane="act" hidden class="actfeed">${d.activity.length ? d.activity.map((l) => {
       const m = /^(\S+) \[([^\]]+)\] (.*)$/.exec(l);
       return m ? `<div><span class="id">${new Date(m[1]).toLocaleTimeString()}</span> <b style="color:var(--text)">${esc(m[2])}</b> ${esc(m[3])}</div>` : `<div>${esc(l)}</div>`;
@@ -784,7 +914,21 @@ async function openTask(id) {
       $('#fileView').innerHTML = /\.(md|txt)$/i.test(b.dataset.file) ? md(f.text) : `<pre>${esc(f.text)}</pre>`;
     } catch (e) { toast(e.message, true); }
   });
-  body.querySelectorAll('[data-open]').forEach((el) => el.onclick = (ev) => { ev.preventDefault(); openTask(el.dataset.open); });
+  const openLinks = () => body.querySelectorAll('[data-open]').forEach((el) => el.onclick = (ev) => { ev.preventDefault(); openTask(el.dataset.open, id); });
+  openLinks();
+  const relog = () => {
+    const tree = $('#logTree')?.checked ?? false, engine = $('#logEngine').checked;
+    try { localStorage.setItem('bf-log', JSON.stringify({ tree, engine })); } catch {}
+    body.querySelector('.loglist').innerHTML = renderLog(d, tree, !engine);
+    openLinks();
+  };
+  if ($('#logTree')) $('#logTree').onchange = relog;
+  $('#logEngine').onchange = relog;
+  body.querySelector('[data-pane="log"]').addEventListener('click', (ev) => {
+    const more = ev.target.closest('.more'); if (!more) return;
+    const p = more.previousElementSibling; p.classList.toggle('clamp');
+    more.textContent = p.classList.contains('clamp') ? '더 보기' : '접기';
+  });
   $('#dlgComment').onclick = () => { const v = $('#dlgNote').value.trim(); if (!v) return toast('내용을 적어 주세요', true); act(id, 'comment', { text: v }, '코멘트를 남겼습니다').then(() => openTask(id)); };
   const cancel = $('#dlgCancel');
   if (cancel) cancel.onclick = () => { if (!confirm(`${id} 와 그 하위 업무를 모두 취소할까요?`)) return; act(id, 'cancel', { reason: $('#dlgNote').value.trim() }, '취소했습니다').then(() => dlg.close()); };
@@ -863,7 +1007,7 @@ async function refresh() {
   try {
     state = await api('/api/state');
     renderHeader(); renderOffice(); renderInbox(); renderBoard(); renderSide();
-    const pending = state.inbox.approvals.length + state.inbox.questions.filter((q) => q.answered == null).length;
+    const pending = state.inbox.approvals.length + state.inbox.mine.length + state.inbox.questions.filter((q) => q.answered == null).length;
     document.title = (pending ? `(${pending}) ` : '') + 'BusinessFactory';
   } catch (e) { $('#engine').className = 'pill bad'; $('#engine').textContent = '서버 연결 끊김'; }
 }

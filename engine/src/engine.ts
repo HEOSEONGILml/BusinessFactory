@@ -54,7 +54,7 @@ interface ActiveRun {
 export interface ActiveRunInfo {
   /** Task id, or conversation id for chat runs. */
   taskId: string;
-  kind: RunKind | 'chat';
+  kind: RunKind | 'chat' | 'comment';
   agent: string;
   startedAt: string;
   /** Chat runs: conversation title and latest action (task runs read these from the board). */
@@ -104,6 +104,8 @@ export class Engine {
   private readonly notify: Sender;
   private readonly ownerNotifier: OwnerNotifier;
   private readonly chatActive = new Map<string, ChatRun>();
+  /** Assignees replying to the owner's comments on inbox items, by task id. */
+  private readonly threadActive = new Map<string, ChatRun>();
   /** The on/off switch. Off: no new runs start; runs in progress finish. */
   private enabled: boolean;
 
@@ -124,7 +126,7 @@ export class Engine {
   }
 
   get runningCount(): number {
-    return this.active.size + this.chatActive.size;
+    return this.active.size + this.chatActive.size + this.threadActive.size;
   }
 
   /**
@@ -165,6 +167,14 @@ export class Engine {
         agent: c.agent,
         startedAt: c.startedAt,
         title: c.mode === 'summary' ? `${c.title} 회의록 작성` : c.title,
+        activity: c.activity,
+      })),
+      ...[...this.threadActive.values()].map((c) => ({
+        taskId: c.convId,
+        kind: 'comment' as const,
+        agent: c.agent,
+        startedAt: c.startedAt,
+        title: c.title,
         activity: c.activity,
       })),
     ];
@@ -210,11 +220,11 @@ export class Engine {
 
   /** Resolves when every launched run has been processed. */
   async drain(): Promise<void> {
-    while (this.active.size + this.chatActive.size > 0) await Promise.race(this.allPromises());
+    while (this.runningCount > 0) await Promise.race(this.allPromises());
   }
 
   private allPromises(): Promise<void>[] {
-    return [...this.active.values(), ...this.chatActive.values()].map((a) => a.promise);
+    return [...this.active.values(), ...this.chatActive.values(), ...this.threadActive.values()].map((a) => a.promise);
   }
 
   /** Runs until nothing is runnable, nothing is active, and no pause is pending. */
@@ -222,7 +232,7 @@ export class Engine {
     this.recover();
     for (;;) {
       this.tick();
-      if (this.active.size + this.chatActive.size === 0) return;
+      if (this.runningCount === 0) return;
       await Promise.race(this.allPromises());
     }
   }
@@ -246,17 +256,18 @@ export class Engine {
 
   /** Meetings speak one at a time; outside meetings, DMs and @mentions get replies. */
   private tickChat(): void {
+    this.tickThreads();
     const cap = this.config.chat.max_concurrency;
     const busyConv = (id: string) => [...this.chatActive.values()].some((r) => r.convId === id);
     for (const conv of listConvs(this.paths)) {
-      if (this.chatActive.size >= cap) return;
+      if (this.chatActive.size + this.threadActive.size >= cap) return;
       if (conv.kind !== 'meeting' || conv.status === 'closed' || busyConv(conv.id)) continue;
       if (conv.queue?.length) this.launchChat(conv, conv.queue[0], 'meeting');
       else if (conv.status === 'closing') this.launchChat(conv, conv.facilitator ?? conv.members[1], 'summary');
     }
     const names = listAgents(this.paths).map((a) => a.name);
     for (const due of dueReplies(this.paths, names, this.config.chat.max_chain)) {
-      if (this.chatActive.size >= cap) return;
+      if (this.chatActive.size + this.threadActive.size >= cap) return;
       if (this.chatActive.has(`${due.convId}:${due.agent}`)) continue;
       this.launchChat(getConv(this.paths, due.convId), due.agent, 'reply', due);
     }
@@ -305,14 +316,19 @@ export class Engine {
 
   private buildChatSpec(conv: Conversation, agent: AgentInfo, mode: ChatMode): RunSpec {
     const chatDir = path.join(this.paths.company, 'chat');
-    // Talking is read-only: no file edits, no shell beyond bf, no workspaces (secrets live there).
+    // No workspaces in the messenger: secrets live there.
+    return this.talkSpec(agent, 'chat', this.chatPrompt(conv, agent.name, mode), chatDir, [chatDir, this.paths.board, this.paths.memory], { BF_CHAT: conv.id });
+  }
+
+  /** Talking is read-only: no file edits and no shell beyond bf. */
+  private talkSpec(agent: AgentInfo, label: string, prompt: string, cwd: string, read: string[], env: Record<string, string>): RunSpec {
     const baseTools = agent.tools.length ? agent.tools : ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'];
     const talker: AgentInfo = {
       ...agent,
       tools: baseTools.filter((t) => !EDIT_TOOLS.has(t)),
       permissions: agent.permissions.filter((p) => /^(WebSearch|WebFetch)\b/.test(p)),
     };
-    const agentsFile = path.join(this.paths.company, '.run', `chat-${agent.name}.json`);
+    const agentsFile = path.join(this.paths.company, '.run', `${label}-${agent.name}.json`);
     fs.mkdirSync(path.dirname(agentsFile), { recursive: true });
     const def: Record<string, unknown> = { description: agent.description || agent.name, prompt: agent.prompt };
     const tools = agentToolList(talker);
@@ -323,9 +339,9 @@ export class Engine {
       command: this.config.claude_command,
       agent: talker,
       agentsFile,
-      prompt: this.chatPrompt(conv, agent.name, mode),
-      cwd: chatDir,
-      access: { write: [], read: [chatDir, this.paths.board, this.paths.memory] },
+      prompt,
+      cwd,
+      access: { write: [], read },
       grants: [],
       handbook: fs.existsSync(this.paths.handbook) ? this.paths.handbook : null,
       maxTurns: this.config.chat.max_turns,
@@ -336,9 +352,133 @@ export class Engine {
         BF_COMPANY: this.paths.company,
         BF_WORKSPACES: this.paths.workspaces,
         BF_ACTOR: agent.name,
-        BF_CHAT: conv.id,
+        ...env,
       },
     };
+  }
+
+  // ---- comment threads on inbox items ----
+
+  private threadCursorFile(): string {
+    return path.join(this.paths.company, '.thread-cursors.json');
+  }
+
+  private threadCursors(): Record<string, number> {
+    try {
+      return JSON.parse(fs.readFileSync(this.threadCursorFile(), 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
+  private setThreadCursor(taskId: string, n: number | undefined): void {
+    const all = this.threadCursors();
+    if (n === undefined) delete all[taskId];
+    else all[taskId] = n;
+    writeFileAtomic(this.threadCursorFile(), JSON.stringify(all));
+  }
+
+  /** The owner commented on an inbox item: the assignee reads it and answers in the thread. */
+  private tickThreads(): void {
+    const cap = this.config.chat.max_concurrency;
+    const cursors = this.threadCursors();
+    for (const task of this.board.list()) {
+      if (this.chatActive.size + this.threadActive.size >= cap) return;
+      if (this.threadActive.has(task.id)) continue;
+      const entries = this.board.thread(task.id);
+      const last = entries.at(-1);
+      if (!last || last.from !== this.config.owner || last.n <= (cursors[task.id] ?? 0)) continue;
+      if (!this.board.awaitsOwner(task, last.item)) continue;
+      const agent = getAgent(this.paths, this.board.responder(task));
+      // Claim it now so the next tick doesn't launch the same reply again.
+      this.setThreadCursor(task.id, last.n);
+      if (agent) this.launchThreadReply(task, agent, last.item, cursors[task.id]);
+    }
+  }
+
+  private launchThreadReply(task: Task, agent: AgentInfo, item: number | null, previousCursor: number | undefined): void {
+    const entry: ChatRun = {
+      convId: task.id,
+      title: `${task.title} 코멘트`,
+      agent: agent.name,
+      mode: 'reply',
+      startedAt: this.now().toISOString(),
+      activity: null,
+      promise: Promise.resolve(),
+    };
+    this.log(`💬 ${task.id} — ${agent.name} 코멘트 답변 작성 시작`);
+    const taskDir = this.board.taskDir(task.id);
+    const read = [taskDir, this.paths.board, this.paths.memory];
+    if (task.workspace) read.push(path.join(this.paths.workspaces, task.workspace));
+    const spec = this.talkSpec(agent, 'thread', this.threadPrompt(task, agent.name, item), taskDir, read, {});
+    spec.onEvent = (ev) => {
+      if (ev.kind === 'activity') {
+        entry.activity = ev.text;
+        this.log(`  💬 ${task.id} ${agent.name} ▸ ${ev.text}`);
+      } else {
+        this.onUsage(ev.usage);
+      }
+    };
+    entry.promise = this.run(spec)
+      .then((r) => this.handleThreadReply(task.id, agent.name, item, r, previousCursor))
+      .catch((err) => this.log(`💬 ${task.id} 코멘트 처리 중 오류: ${err instanceof Error ? err.stack : String(err)}`))
+      .finally(() => this.threadActive.delete(task.id));
+    this.threadActive.set(task.id, entry);
+  }
+
+  private threadPrompt(task: Task, agent: string, item: number | null): string {
+    const owner = this.config.owner;
+    const what = this.board.isOwnerTask(task)
+      ? `당신이 사용자에게 맡긴 업무입니다. 지시서는 \`bf task show ${task.id}\` 로 볼 수 있습니다. 사용자가 끝내면 완료 보고가 올라옵니다.`
+      : task.approval
+      ? `당신이 올린 결재 요청: ${task.approval.what}${task.approval.grants.length ? ` (요청 권한: ${task.approval.grants.join(', ')})` : ''}`
+      : task.status === 'blocked'
+        ? `당신이 사용자에게 한 질문${item ? ` (${item}/${task.questions!.length}번)` : ''}: ${item ? task.questions!.find((q) => q.id === item)!.text : '`bf task show` 이력의 마지막 질문'}`
+        : `이 목표는 ${STATUS_LABEL[task.status]} 상태로 끝났고, 사용자가 결과를 확인하는 중입니다. 결과물은 output/ 에 있습니다.`;
+    const thread = this.board
+      .thread(task.id, item)
+      .map((e) => `[${e.from === owner ? '사용자' : e.from}] ${e.text}`)
+      .join('\n\n');
+    return [
+      `[코멘트] 당신은 ${agent} 입니다. 업무 ${task.id} "${task.title}" 의 처리할 일에 사용자가 코멘트를 달았습니다.`,
+      what,
+      '',
+      '코멘트 (오래된 것 → 최신):',
+      '---',
+      thread,
+      '---',
+      '',
+      '사용자의 마지막 코멘트에 코멘트로 답하세요.',
+      '- 최종 출력은 코멘트 본문 그대로입니다. 인사말, 서명, 따옴표 없이 씁니다.',
+      '- 질문에는 직접 답하고, 사용자의 말을 어떻게 이해했는지와 그래서 무엇을 할지 짧고 구체적으로 씁니다. 필요한 것이 더 있으면 물어봅니다.',
+      `- 사실 확인이 필요하면 \`bf task show ${task.id}\` 와 파일 읽기로 확인합니다. 추측은 추측이라고 밝힙니다.`,
+      '- 지금은 코멘트만 답니다. 업무 상태를 바꾸는 bf 명령(done, ask, answer 등)은 쓰지 마세요. 진행 여부는 사용자가 답변 확정·승인·확인 버튼으로 정합니다.',
+      '- bf 로 따로 코멘트를 남기지 마세요. 최종 출력이 곧 코멘트입니다.',
+    ].join('\n');
+  }
+
+  private handleThreadReply(taskId: string, agent: string, item: number | null, r: RunResult, previousCursor: number | undefined): void {
+    this.recordUsage(taskId, 'comment', agent, r);
+    if (isUsageLimit(r)) {
+      // Give the turn back; it will be retried after the reset.
+      this.setThreadCursor(taskId, previousCursor);
+      this.pausedUntil = parseResetTime(`${r.text}\n${r.stderr}`, this.now());
+      this.log(`사용량 한도 도달. ${this.pausedUntil.toLocaleString()} 까지 대기`);
+      return;
+    }
+    const text = r.text.trim();
+    if (r.isError || r.timedOut || !text) {
+      this.log(`💬 ${taskId} — ${agent} 코멘트 답변 실패: ${(r.text || r.stderr || '출력 없음').split('\n')[0].slice(0, 120)}`);
+      return;
+    }
+    try {
+      this.board.threadPost(agent, taskId, text, item);
+      this.notify({ title: `코멘트 · ${taskId} · ${agent}`, body: text.slice(0, 200) });
+    } catch {
+      // The owner already decided while the reply was being written: keep it in the history only.
+      this.board.comment(agent, taskId, text);
+    }
+    this.commit(`${taskId} ${agent}: 코멘트`);
   }
 
   private chatPrompt(conv: Conversation, agent: string, mode: ChatMode): string {
@@ -650,6 +790,12 @@ export class Engine {
         `- 하위 업무 ${questions.map((k) => k.id).join(', ')} 에서 당신에게 질문이 왔습니다. \`bf task show <번호>\` 로 질문을 읽고 \`bf task answer <번호> "<답>"\` 으로 답하세요. 당신도 모르는 사용자 판단이 필요하면 \`bf task ask ${task.id} "<질문>"\` 으로 위에 물으세요.`,
       );
     }
+    const ownerOpen = kids.filter((k) => this.board.isOwnerTask(k) && !isTerminal(k.status));
+    if (ownerOpen.length > 0) {
+      lines.push(
+        `- 사용자 업무 ${ownerOpen.map((k) => k.id).join(', ')} 는 사용자가 처리 중입니다. 기다리지 말고 그것 없이 할 수 있는 일을 진행하세요. 그 결과가 꼭 필요한 업무는 --depends <번호> 로 걸어 두면 끝난 뒤 시작됩니다.`,
+      );
+    }
     if (kids.length > 0 && kids.every((k) => isTerminal(k.status))) {
       lines.push(
         `- 맡긴 하위 업무가 모두 끝났습니다. 각 하위 업무의 결과물(${this.paths.board}${path.sep}<번호>${path.sep}output)과 이력을 확인해 취합하세요.`,
@@ -728,7 +874,7 @@ export class Engine {
     this.commit(`${taskId} ${agent.name}: ${STATUS_LABEL[this.board.read(taskId).task.status]}`);
   }
 
-  private recordUsage(taskId: string, kind: RunKind, agent: string, r: RunResult): void {
+  private recordUsage(taskId: string, kind: RunKind | 'comment', agent: string, r: RunResult): void {
     const task = this.board.read(taskId).task;
     const entry = {
       at: this.now().toISOString(),

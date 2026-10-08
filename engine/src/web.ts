@@ -37,7 +37,7 @@ export interface EngineStatus {
   enabled?: boolean;
   stopping?: boolean;
   /** Runs in progress; only known when the console runs inside the engine. */
-  active?: { taskId: string; kind: 'work' | 'review' | 'chat'; agent: string; startedAt: string; title?: string; activity?: string | null }[];
+  active?: { taskId: string; kind: 'work' | 'review' | 'chat' | 'comment'; agent: string; startedAt: string; title?: string; activity?: string | null }[];
 }
 
 type TaskList = ReturnType<Board['list']>;
@@ -53,7 +53,7 @@ export function buildOffice(board: Board, agents: { name: string; model: string 
   const byId = new Map(tasks.map((t) => [t.id, t]));
   return agents.map((a) => {
     const runs = active.filter((r) => r.agent === a.name).map((r) =>
-      r.kind === 'chat'
+      r.kind === 'chat' || r.kind === 'comment'
         ? { taskId: r.taskId, kind: r.kind, title: r.title ?? '', startedAt: r.startedAt, activity: r.activity ?? null }
         : {
             taskId: r.taskId,
@@ -67,7 +67,7 @@ export function buildOffice(board: Board, agents: { name: string; model: string 
     return {
       ...a,
       state: runs.length
-        ? runs.every((r) => r.kind === 'chat') ? 'talking' : runs.every((r) => r.kind !== 'work') ? 'reviewing' : 'working'
+        ? runs.every((r) => r.kind === 'chat' || r.kind === 'comment') ? 'talking' : runs.every((r) => r.kind !== 'work') ? 'reviewing' : 'working'
         : 'idle',
       runs,
       queue: mine.filter((t) => t.status === 'pending').length + (a.name === board.config.reviewer ? tasks.filter((t) => t.status === 'review').length : 0),
@@ -125,9 +125,16 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
   const owner = board.config.owner;
   const proposals = new Map(pendingProposals(paths).map((p) => [p.name, p]));
 
+  // Who is replying to a comment right now, so the card can say so.
+  const replying = new Set((engine.active ?? []).filter((r) => r.kind === 'comment').map((r) => r.taskId));
+  const thread = (t: Task, item: number | null) => ({
+    thread: board.thread(t.id, item),
+    replying: replying.has(t.id),
+  });
   const approvals = tasks
     .filter((t) => t.status === 'blocked' && t.approval)
     .map((t) => ({
+      ...thread(t, null),
       id: t.id,
       assignee: t.assignee,
       title: t.title,
@@ -147,9 +154,10 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
     }));
   const questions = tasks
     .filter((t) => t.status === 'blocked' && !t.approval && t.ask_to === owner)
-    .flatMap((t): { id: string; item: number | null; total: number; answered: string | null; assignee: string; title: string; question: string }[] =>
+    .flatMap((t) =>
       t.questions?.length
         ? t.questions.map((q) => ({
+            ...thread(t, q.id),
             id: t.id,
             item: q.id,
             total: t.questions!.length,
@@ -158,11 +166,24 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
             title: t.title,
             question: q.text,
           }))
-        : [{ id: t.id, item: null, total: 1, answered: null, assignee: t.assignee, title: t.title, question: lastLogEntry(board.readLog(t.id), '질문') }],
+        : [{ ...thread(t, null), id: t.id, item: null as number | null, total: 1, answered: null as string | null, assignee: t.assignee, title: t.title, question: lastLogEntry(board.readLog(t.id), '질문') }],
     );
+  // Work handed to the owner (sign-ups, outside contact): done from the inbox, never run by the engine.
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const mine = tasks
+    .filter((t) => board.awaitsOwner(t) && board.isOwnerTask(t))
+    .map((t) => ({
+      ...thread(t, null),
+      id: t.id,
+      assignee: board.responder(t),
+      parent: t.parent,
+      title: t.title,
+      body: board.read(t.id).body,
+      waitingOn: t.depends_on.filter((d) => byId.get(d)?.status !== 'done'),
+    }));
   const finished = tasks
     .filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && t.status !== 'canceled')
-    .map((t) => ({ id: t.id, title: t.title, status: t.status, label: statusLabel(t) }));
+    .map((t) => ({ ...thread(t, null), id: t.id, assignee: t.assignee, title: t.title, status: t.status, label: statusLabel(t) }));
 
   const since = Date.now() - 7 * 86_400_000;
   const runs = readUsage(paths).filter((e) => Date.parse(e.at) >= since);
@@ -171,10 +192,11 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
 
   return {
     company: path.basename(path.dirname(paths.company)),
+    owner,
     engine,
     usage: readUsageSnapshot(paths),
     runs: { total: runs.length, byAgent },
-    inbox: { approvals, questions, finished },
+    inbox: { approvals, mine, questions, finished },
     tasks: tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -238,7 +260,30 @@ function taskDetail(board: Board, id: string) {
     activity,
     outputs,
     children: board.children(id).map((c) => ({ id: c.id, title: c.title, status: c.status, label: statusLabel(c), assignee: c.assignee })),
+    // Every task below this one, depth-first, with its history: one timeline for the whole tree.
+    tree: descendants(board, id).map(({ task: c, depth }) => ({
+      id: c.id,
+      title: c.title,
+      status: c.status,
+      label: statusLabel(c),
+      assignee: c.assignee,
+      depth,
+      log: board.readLog(c.id),
+    })),
   };
+}
+
+function descendants(board: Board, id: string): { task: Task; depth: number }[] {
+  const all = board.list();
+  const out: { task: Task; depth: number }[] = [];
+  const walk = (pid: string, depth: number) => {
+    for (const c of all.filter((t) => t.parent === pid)) {
+      out.push({ task: c, depth });
+      walk(c.id, depth + 1);
+    }
+  };
+  walk(id, 1);
+  return out;
 }
 
 function outputPath(board: Board, id: string, rel: string): string {
@@ -317,8 +362,12 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
     deny: (id, b) => board.deny(owner, id, String(b.reason ?? ''), (names) => discardHires(paths, names)),
     answer: (id, b) => board.answer(owner, id, String(b.text ?? ''), Number.isInteger(b.item) ? b.item : undefined),
     ack: (id) => board.acknowledge(owner, id),
+    finish: (id, b) => board.done(owner, id, String(b.text ?? '')),
     cancel: (id, b) => board.cancel(owner, id, String(b.reason ?? '')),
-    comment: (id, b) => board.comment(owner, id, String(b.text ?? '')),
+    // On an inbox item a comment joins its thread, so the employee answers it.
+    comment: (id, b) =>
+      board.awaitsOwner(board.read(id).task) ? board.threadPost(owner, id, String(b.text ?? '')) : board.comment(owner, id, String(b.text ?? '')),
+    thread: (id, b) => board.threadPost(owner, id, String(b.text ?? ''), Number.isInteger(b.item) ? b.item : null),
   };
 
   const server = http.createServer(async (req, res) => {

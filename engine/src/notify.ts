@@ -99,6 +99,11 @@ export function ownerItems(board: Board): { key: string; notice: Notice }[] {
       } else {
         items.push({ key, notice: { title: `질문 · ${t.id}`, body: `${lastQuestion(board, t)}\n→ bf task answer ${num(t)} "답"` } });
       }
+    } else if (board.isOwnerTask(t) && t.status === 'pending') {
+      items.push({
+        key: `${t.id}:mine`,
+        notice: { title: `사용자 업무 · ${t.id} · ${t.created_by}`, body: `${t.title}\n→ 웹 화면 처리할 일, 또는 bf task done ${num(t)} --summary "결과"` },
+      });
     } else if (t.parent === null && isTerminal(t.status) && !t.acknowledged && t.status !== 'canceled') {
       const done = t.status === 'done';
       items.push({

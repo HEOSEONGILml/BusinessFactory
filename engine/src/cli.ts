@@ -50,7 +50,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf task answer <id> [--item n] "<답변>"
   bf task pass <id> [--note "<메모>"]
   bf task reject <id> "<사유>"
-  bf task comment <id> "<내용>"
+  bf task comment <id> "<내용>" [--item <번호>]
   bf task cancel <id> [--reason "<사유>"]
 
 결재·채용·기억 (직원용)
@@ -456,8 +456,20 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
     }
 
     case 'comment': {
-      const [id, ...text] = args;
-      board.comment(actor, requireId([id]), text.join(' '));
+      // Not parseArgs: comment text may itself start with '-'.
+      const rest = [...args];
+      const at = rest.indexOf('--item');
+      const item = at === -1 ? null : Number(rest.splice(at, 2)[1]);
+      const [raw, ...words] = rest;
+      const id = requireId([raw]);
+      const text = words.join(' ');
+      // On an owner inbox item the comment joins its thread, and the assignee replies there.
+      if (actor === board.config.owner && board.awaitsOwner(board.read(id).task, item)) {
+        board.threadPost(actor, id, text, item);
+        io.out('코멘트를 달았습니다. 담당자가 확인하고 답합니다.');
+        return 0;
+      }
+      board.comment(actor, id, text);
       io.out('기록했습니다.');
       return 0;
     }
@@ -484,17 +496,33 @@ function printInbox(board: Board, io: Io): void {
   const tasks = board.list();
   const approvals = tasks.filter((t) => t.status === 'blocked' && t.approval);
   const questions = tasks.filter((t) => t.status === 'blocked' && !t.approval && t.ask_to === owner);
+  const mine = tasks.filter((t) => board.isOwnerTask(t) && t.status === 'pending');
   const finished = tasks.filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged);
-  if (!approvals.length && !questions.length && !finished.length) {
+  if (!approvals.length && !mine.length && !questions.length && !finished.length) {
     io.out('처리할 일이 없습니다.');
     return;
   }
+  const thread = (t: Task) => {
+    for (const e of board.thread(t.id)) {
+      io.out(`      💬 ${e.item ? `(${e.item}번) ` : ''}${e.from === owner ? '사용자' : e.from}: ${e.text.split('\n')[0]}`);
+    }
+  };
+  io.out('코멘트: bf task comment <id> "<내용>" [--item <번호>] — 담당자가 확인하고 코멘트로 답합니다.\n');
   if (approvals.length) {
     io.out('■ 결재 대기  (bf approve <id> / bf deny <id> "<사유>")');
     for (const t of approvals) {
       io.out(`  ${t.id} [${t.assignee}] ${t.approval!.what}`);
       if (t.approval!.grants.length) io.out(`      요청 권한: ${t.approval!.grants.join(', ')}`);
       if (t.approval!.hires.length) io.out('      채용안 내용: bf hire list');
+      thread(t);
+    }
+  }
+  if (mine.length) {
+    io.out('■ 내가 할 일  (지시서: bf task show <id> / 끝나면 bf task done <id> --summary "<결과>")');
+    for (const t of mine) {
+      const waits = t.depends_on.filter((d) => board.read(d).task.status !== 'done');
+      io.out(`  ${t.id} [${t.created_by} 요청] ${t.title}${waits.length ? `  (먼저: ${waits.join(', ')})` : ''}`);
+      thread(t);
     }
   }
   if (questions.length) {
@@ -511,6 +539,7 @@ function printInbox(board: Board, io: Io): void {
         const asked = board.readLog(t.id).split('\n').filter((l) => l.includes('] 질문:')).pop() ?? '';
         io.out(`      ${asked.replace(/^- \S+ /, '')}`);
       }
+      thread(t);
     }
   }
   if (finished.length) {
@@ -518,6 +547,7 @@ function printInbox(board: Board, io: Io): void {
     for (const t of finished) {
       io.out(`  ${formatRow(t)}`);
       io.out(`      결과물: ${path.join(board.taskDir(t.id), 'output')}`);
+      thread(t);
     }
   }
 }
@@ -533,7 +563,7 @@ function printStatus(board: Board, io: Io): void {
     io.out('\n목표');
     for (const g of goals) io.out(`  ${formatRow(g)}`);
   }
-  const attention = tasks.filter((t) => t.status === 'blocked' && t.ask_to === board.config.owner);
+  const attention = tasks.filter((t) => (t.status === 'blocked' && t.ask_to === board.config.owner) || (board.isOwnerTask(t) && t.status === 'pending'));
   if (attention.length) io.out(`\n사용자 처리 필요 ${attention.length}건 → bf inbox`);
   const active = tasks.filter((t) => t.status === 'running');
   if (active.length) {
