@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BusinessFactory</title>
+<style>
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --line: #e3e6eb; --text: #1d2330; --muted: #6b7385; --faint: #9aa1b0;
+  --accent: #3b5bdb; --accent-soft: #e7ecff; --ok: #2f9e44; --ok-soft: #e6f6ea; --warn: #e8890c; --warn-soft: #fff3df;
+  --bad: #e03131; --bad-soft: #ffe8e8; --info: #1c7ed6; --info-soft: #e3f1ff; --idle: #868e96; --idle-soft: #eef0f2;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1a1e26; --line: #2a303b; --text: #e6e9ef; --muted: #9aa3b5; --faint: #6c7486;
+    --accent: #7c95ff; --accent-soft: #232b45; --ok: #51cf66; --ok-soft: #1c3324; --warn: #ffa94d; --warn-soft: #3a2b14;
+    --bad: #ff6b6b; --bad-soft: #3d1d1f; --info: #4dabf7; --info-soft: #182c40; --idle: #9aa1ab; --idle-soft: #262b33;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 "Pretendard", "Malgun Gothic", system-ui, sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); }
+
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; padding: 10px 20px; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 16px; letter-spacing: -.2px; }
+.brand small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.idle { background: var(--idle-soft); color: var(--idle); }
+.meters { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
+.meter { min-width: 170px; font-size: 12px; color: var(--muted); }
+.meter .top { display: flex; justify-content: space-between; gap: 10px; }
+.meter .top small { color: var(--faint); font-size: 11px; }
+.meter .bar { height: 6px; border-radius: 3px; background: var(--idle-soft); overflow: hidden; margin-top: 3px; }
+.meter .bar i { display: block; height: 100%; background: var(--ok); }
+.meter.mid .bar i { background: var(--warn); } .meter.high .bar i { background: var(--bad); }
+
+main { padding: 16px 20px 40px; max-width: 1600px; margin: 0 auto; }
+.composer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 12px; margin-bottom: 16px; }
+.composer textarea { width: 100%; min-height: 44px; resize: vertical; border: none; outline: none; background: transparent; font-size: 15px; }
+.composer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; }
+.composer label { font-size: 12.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.composer select, .composer input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--bg); }
+
+.grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.4fr) minmax(320px, 1.1fr); gap: 16px; align-items: start; }
+@media (max-width: 1150px) { .grid { grid-template-columns: 1fr 1fr; } .feed-col { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } header { padding: 10px 14px; } main { padding: 12px 14px 40px; } }
+
+section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+.panel > h2 { margin: 0; font-size: 13.5px; font-weight: 700; padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.panel > h2 .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11.5px; }
+.panel > h2 .spacer { flex: 1; }
+.panel-body { padding: 12px 14px; }
+.empty { color: var(--faint); text-align: center; padding: 18px 0; font-size: 13px; }
+.stack > * + * { margin-top: 10px; }
+
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
+.card.approval { border-left: 3px solid var(--warn); } .card.question { border-left: 3px solid var(--info); } .card.finished { border-left: 3px solid var(--ok); }
+.card .kind { font-size: 11.5px; font-weight: 700; letter-spacing: .3px; }
+.card.approval .kind { color: var(--warn); } .card.question .kind { color: var(--info); } .card.finished .kind { color: var(--ok); }
+.card .title { font-weight: 600; margin: 2px 0 6px; }
+.card .meta { color: var(--muted); font-size: 12px; }
+.card pre, .prose pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.55 inherit; margin: 6px 0; }
+.card .actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+.card textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--bg); resize: vertical; }
+.grant { display: inline-block; font-family: var(--mono); font-size: 12px; background: var(--warn-soft); color: var(--warn); border-radius: 4px; padding: 1px 6px; margin: 2px 4px 2px 0; }
+details.hire { margin-top: 6px; border: 1px dashed var(--line); border-radius: 6px; padding: 6px 8px; }
+details.hire summary { cursor: pointer; font-weight: 600; }
+
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.good { background: var(--ok); border-color: var(--ok); color: #fff; }
+.btn.danger { color: var(--bad); }
+.btn.small { padding: 2px 8px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.chip { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.s-running { background: var(--info-soft); color: var(--info); }
+.s-pending, .s-waiting { background: var(--idle-soft); color: var(--idle); }
+.s-review { background: var(--accent-soft); color: var(--accent); }
+.s-blocked { background: var(--warn-soft); color: var(--warn); }
+.s-done { background: var(--ok-soft); color: var(--ok); }
+.s-failed { background: var(--bad-soft); color: var(--bad); }
+.s-canceled, .s-awaiting_approval { background: var(--idle-soft); color: var(--faint); }
+
+.goal { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.goal + .goal { margin-top: 10px; }
+.goal-head { padding: 9px 12px; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; }
+.goal-head:hover, .trow:hover { background: var(--bg); }
+.goal-head .title { font-weight: 600; }
+.goal-head > .chip, .trow > .chip { align-self: start; justify-self: end; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); }
+.tags span { background: var(--bg); border-radius: 4px; padding: 0 6px; }
+.trow { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+.trow .id, .goal-head .id { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+.trow .who { color: var(--muted); font-size: 12px; }
+.live { grid-column: 1 / -1; font-size: 12px; color: var(--info); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live::before { content: "▸ "; }
+
+.feed { font-family: var(--mono); font-size: 12px; line-height: 1.6; height: calc(100vh - 230px); min-height: 320px; overflow-y: auto; padding: 8px 12px; }
+.feed div { white-space: pre-wrap; word-break: break-word; }
+.feed .t { color: var(--faint); }
+.feed .act { color: var(--muted); padding-left: 14px; }
+.feed .start { color: var(--accent); font-weight: 600; }
+.feed .alert { color: var(--bad); font-weight: 600; }
+.feed .note { color: var(--ok); }
+.feed .tid { cursor: pointer; text-decoration: underline dotted; }
+
+.side-list { font-size: 13px; }
+.side-list div { display: flex; gap: 8px; padding: 3px 0; }
+.side-list b { min-width: 110px; font-weight: 600; }
+.side-list span { color: var(--muted); }
+
+dialog { border: none; border-radius: 12px; padding: 0; width: min(920px, 94vw); max-height: 90vh; background: var(--panel); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+dialog::backdrop { background: rgba(10,14,22,.45); }
+.dlg-head { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; position: sticky; top: 0; background: var(--panel); }
+.dlg-head h3 { margin: 0; font-size: 16px; flex: 1; }
+.dlg-body { padding: 14px 18px 20px; overflow-y: auto; max-height: calc(90vh - 60px); }
+.dlg-body h4 { margin: 18px 0 6px; font-size: 13px; color: var(--muted); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 12px 0 10px; }
+.tabs button { border: none; background: none; padding: 6px 10px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; }
+.tabs button.on { color: var(--accent); border-color: var(--accent); }
+.loglist { font-size: 13px; }
+.loglist .entry { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.loglist .entry .h { font-size: 12px; color: var(--muted); }
+.loglist .entry .h b { color: var(--text); }
+.files { display: flex; gap: 6px; flex-wrap: wrap; }
+.mono { font-family: var(--mono); font-size: 12px; }
+
+.prose { font-size: 14px; line-height: 1.65; }
+.prose h1, .prose h2, .prose h3 { margin: 14px 0 6px; line-height: 1.3; } .prose h1 { font-size: 18px; } .prose h2 { font-size: 16px; } .prose h3 { font-size: 14.5px; }
+.prose code { font-family: var(--mono); font-size: 12.5px; background: var(--bg); padding: 0 4px; border-radius: 3px; }
+.prose pre { background: var(--bg); padding: 10px; border-radius: 6px; font-family: var(--mono); font-size: 12.5px; }
+.prose table { border-collapse: collapse; margin: 8px 0; font-size: 13px; display: block; overflow-x: auto; }
+.prose th, .prose td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.prose blockquote { margin: 6px 0; padding: 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.prose ul, .prose ol { padding-left: 22px; margin: 6px 0; }
+
+#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-weight: 600; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
+#toast.show { opacity: 1; } #toast.err { background: var(--bad); color: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">BusinessFactory<small id="company"></small></div>
+  <span id="engine" class="pill idle">확인 중</span>
+  <div class="meters" id="meters"></div>
+</header>
+
+<main>
+  <div class="composer">
+    <textarea id="goalText" placeholder="회사에 시킬 일을 적으세요. 예) 돈 벌 수 있는 웹 서비스 아이디어 10개를 조사해서 순위를 매겨줘"></textarea>
+    <div class="row">
+      <label>작업 공간 <select id="goalWorkspace"><option value="">없음</option></select></label>
+      <label>프로젝트 <input id="goalProject" list="projects" placeholder="선택 사항" size="12"></label>
+      <datalist id="projects"></datalist>
+      <span style="flex:1"></span>
+      <button class="btn primary" id="goalSubmit">목표 등록</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="stack">
+      <section class="panel">
+        <h2>처리할 일 <span class="count" id="inboxCount" hidden></span></h2>
+        <div class="panel-body stack" id="inbox"></div>
+      </section>
+      <section class="panel">
+        <h2>회사</h2>
+        <div class="panel-body">
+          <div class="side-list" id="staff"></div>
+          <h4 style="margin:14px 0 4px;font-size:12.5px;color:var(--muted)">회사 기억</h4>
+          <div class="side-list" id="memory"></div>
+          <h4 style="margin:14px 0 4px;font-size:12.5px;color:var(--muted)">최근 7일 실행</h4>
+          <div class="side-list" id="runs"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>업무 현황 <span class="spacer"></span>
+        <label style="font-weight:500;font-size:12px;color:var(--muted)"><input type="checkbox" id="showDone"> 끝난 목표도 보기</label>
+      </h2>
+      <div class="panel-body" id="board"></div>
+    </section>
+
+    <section class="panel feed-col">
+      <h2>실시간 활동 <span class="spacer"></span><span id="feedState" class="mono" style="color:var(--faint);font-weight:500"></span></h2>
+      <div class="feed" id="feed"></div>
+    </section>
+  </div>
+</main>
+
+<dialog id="dlg">
+  <div class="dlg-head"><h3 id="dlgTitle"></h3><button class="btn small" onclick="dlg.close()">닫기</button></div>
+  <div class="dlg-body" id="dlgBody"></div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const TOKEN = '%%TOKEN%%';
+let state = null;
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = (id) => String(Number(String(id).slice(1)));
+
+function toast(msg, err) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.className = ''), 2600);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BF-Token': TOKEN }, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || '요청 실패');
+  return data;
+}
+
+async function act(id, action, body, okMsg) {
+  try { await api(`/api/task/${id}/${action}`, body); toast(okMsg); await refresh(); }
+  catch (e) { toast(e.message, true); }
+}
+
+/* ---------- tiny markdown ---------- */
+function md(src) {
+  const lines = String(src ?? '').replace(/\r/g, '').split('\n');
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  let out = '', i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) { let b = ''; i++; while (i < lines.length && !/^```/.test(lines[i])) b += lines[i++] + '\n'; i++; out += `<pre>${esc(b)}</pre>`; continue; }
+    const h = /^(#{1,4})\s+(.*)$/.exec(l); if (h) { const n = Math.min(h[1].length, 3); out += `<h${n}>${inline(h[2])}</h${n}>`; i++; continue; }
+    if (/^\|/.test(l)) {
+      const rows = []; while (i < lines.length && /^\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = (r) => r.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const body = rows.filter((r) => !/^\|[\s:|-]+\|$/.test(r));
+      out += '<table>' + body.map((r, k) => '<tr>' + cells(r).map((c) => k === 0 ? `<th>${inline(c)}</th>` : `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</table>';
+      continue;
+    }
+    if (/^>\s?/.test(l)) { let b = []; while (i < lines.length && /^>\s?/.test(lines[i])) b.push(lines[i++].replace(/^>\s?/, '')); out += `<blockquote>${inline(b.join(' '))}</blockquote>`; continue; }
+    if (/^\s*[-*]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) b += `<li>${inline(lines[i++].replace(/^\s*[-*]\s+/, ''))}</li>`; out += `<ul>${b}</ul>`; continue; }
+    if (/^\s*\d+[.)]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) b += `<li>${inline(lines[i++].replace(/^\s*\d+[.)]\s+/, ''))}</li>`; out += `<ol>${b}</ol>`; continue; }
+    if (!l.trim()) { i++; continue; }
+    let p = []; while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\||>|\s*[-*]\s|\s*\d+[.)]\s)/.test(lines[i])) p.push(lines[i++]);
+    out += `<p>${p.map(inline).join('<br>')}</p>`;
+  }
+  return out;
+}
+
+/* ---------- header ---------- */
+function renderHeader() {
+  $('#company').textContent = state.company ? `· ${state.company}` : '';
+  const e = state.engine, el = $('#engine');
+  if (e.halted) { el.className = 'pill bad'; el.textContent = '엔진 정지'; el.title = e.halted; }
+  else if (!e.running) { el.className = 'pill idle'; el.textContent = '엔진 꺼짐'; el.title = 'npm start 로 켜세요'; }
+  else if (e.pausedUntil) { el.className = 'pill warn'; el.textContent = `휴식 중 · ${new Date(e.pausedUntil).toLocaleTimeString()}까지`; el.title = '사용량 한도'; }
+  else { el.className = 'pill ok'; el.textContent = '가동 중'; el.title = ''; }
+
+  const labels = { five_hour: '5시간 한도', seven_day: '주간 한도' };
+  const w = state.usage?.windows ?? {};
+  $('#meters').innerHTML = Object.keys(w).length ? Object.entries(w).map(([k, v]) => {
+    const pct = Math.round(v.utilization * 100);
+    const cls = pct >= 80 ? 'high' : pct >= 50 ? 'mid' : '';
+    return `<div class="meter ${cls}" title="리셋 ${new Date(v.resetsAt * 1000).toLocaleString()}"><div class="top"><span>${labels[k] ?? k} <b>${pct}%</b></span>
+      <small>${new Date(v.resetsAt * 1000).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 리셋</small></div>
+      <div class="bar"><i style="width:${Math.min(pct, 100)}%"></i></div></div>`;
+  }).join('') : '<div class="meter">구독 사용량: 직원이 한 번 일하면 표시됩니다</div>';
+}
+
+/* ---------- inbox ---------- */
+function renderInbox() {
+  const { approvals, questions, finished } = state.inbox;
+  const n = approvals.length + questions.length + finished.length;
+  const c = $('#inboxCount'); c.hidden = !n; c.textContent = n;
+  if (!n) { $('#inbox').innerHTML = '<div class="empty">처리할 일이 없습니다 🎉</div>'; return; }
+  let h = '';
+  for (const a of approvals) {
+    h += `<div class="card approval" data-id="${a.id}">
+      <div class="kind">결재 요청 · ${a.id} · ${esc(a.assignee)}</div>
+      <div class="title">${esc(a.what)}</div>
+      ${a.grants.length ? `<div class="meta">요청 권한: ${a.grants.map((g) => `<span class="grant">${esc(g)}</span>`).join('')}</div>` : ''}
+      ${a.hires.map((p) => `<details class="hire"><summary>채용안: ${esc(p.name)} (${esc(p.model ?? '-')})</summary>
+        <div class="meta" style="margin:6px 0">${esc(p.description)}</div>
+        <div class="meta">도구: ${esc(p.tools.join(', ') || '전체')}</div>
+        <div class="meta">추가 권한: ${p.permissions.length ? p.permissions.map((g) => `<span class="grant">${esc(g)}</span>`).join('') : '없음'}</div>
+        <div class="prose" style="margin-top:8px">${md(p.body.replace(/^---[\s\S]*?\n---\n/, ''))}</div></details>`).join('')}
+      <textarea placeholder="메모 또는 반려 사유 (반려 시 필수)"></textarea>
+      <div class="actions">
+        <button class="btn good" data-act="approve">승인</button>
+        <button class="btn danger" data-act="deny">반려</button>
+        <span style="flex:1"></span><button class="btn small" data-open="${a.id}">자세히</button>
+      </div></div>`;
+  }
+  for (const q of questions) {
+    h += `<div class="card question" data-id="${q.id}">
+      <div class="kind">질문 · ${q.id} · ${esc(q.assignee)}</div>
+      <div class="title">${esc(q.title)}</div>
+      <div class="prose">${md(q.question)}</div>
+      <textarea placeholder="답변을 적으세요. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
+      <div class="actions"><button class="btn primary" data-act="answer">답변 보내기</button>
+        <span style="flex:1"></span><button class="btn small" data-open="${q.id}">자세히</button></div></div>`;
+  }
+  for (const f of finished) {
+    h += `<div class="card finished" data-id="${f.id}">
+      <div class="kind">${f.status === 'done' ? '목표 완료' : '목표 실패'} · ${f.id}</div>
+      <div class="title">${esc(f.title)}</div>
+      <div class="actions"><button class="btn primary" data-open="${f.id}">결과 보기</button>
+        <button class="btn" data-act="ack">확인 완료</button></div></div>`;
+  }
+  $('#inbox').innerHTML = h;
+}
+
+$('#inbox').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button'); if (!b) return;
+  const card = b.closest('.card'), id = card?.dataset.id;
+  if (b.dataset.open) return openTask(b.dataset.open);
+  const text = card.querySelector('textarea')?.value.trim() ?? '';
+  if (b.dataset.act === 'approve') act(id, 'approve', { note: text }, '승인했습니다');
+  if (b.dataset.act === 'deny') { if (!text) return toast('반려 사유를 적어 주세요', true); act(id, 'deny', { reason: text }, '반려했습니다'); }
+  if (b.dataset.act === 'answer') { if (!text) return toast('답변을 적어 주세요', true); act(id, 'answer', { text }, '답변을 보냈습니다'); }
+  if (b.dataset.act === 'ack') act(id, 'ack', {}, '확인 처리했습니다');
+});
+
+/* ---------- board ---------- */
+function renderBoard() {
+  const tasks = state.tasks, byParent = {};
+  for (const t of tasks) (byParent[t.parent ?? 'root'] ??= []).push(t);
+  const showDone = $('#showDone').checked;
+  const terminal = (t) => ['done', 'failed', 'canceled'].includes(t.status);
+  const goals = (byParent.root ?? []).filter((g) => showDone || !terminal(g) || !g.acknowledged)
+    .sort((a, b) => terminal(a) - terminal(b) || b.id.localeCompare(a.id));
+  const chip = (t) => `<span class="chip s-${t.status}">${esc(t.label)}</span>`;
+  const rows = (pid, depth) => (byParent[pid] ?? []).map((t) => `
+    <div class="trow" data-open="${t.id}" style="padding-left:${12 + depth * 16}px">
+      <span class="id">${t.id}</span><span>${esc(t.title)} <span class="who">· ${esc(t.assignee)}</span></span>${chip(t)}
+      ${t.activity ? `<div class="live">${esc(t.activity)}</div>` : ''}
+    </div>${rows(t.id, depth + 1)}`).join('');
+  $('#board').innerHTML = goals.length ? goals.map((g) => `
+    <div class="goal">
+      <div class="goal-head" data-open="${g.id}">
+        <div><span class="id">${g.id}</span> <span class="title">${esc(g.title)}</span></div>${chip(g)}
+        <div class="tags"><span>${esc(g.assignee)}</span>${g.project ? `<span>프로젝트 ${esc(g.project)}</span>` : ''}${g.workspace ? `<span>작업 공간 ${esc(g.workspace)}</span>` : ''}<span>${new Date(g.created_at).toLocaleString()}</span></div>
+        ${g.activity ? `<div class="live">${esc(g.activity)}</div>` : ''}
+      </div>${rows(g.id, 0)}
+    </div>`).join('') : '<div class="empty">진행 중인 목표가 없습니다. 위에서 목표를 등록하세요.</div>';
+}
+$('#board').addEventListener('click', (ev) => { const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open); });
+$('#showDone').addEventListener('change', renderBoard);
+
+/* ---------- side ---------- */
+function renderSide() {
+  $('#staff').innerHTML = state.agents.map((a) => `<div><b>${esc(a.name)}</b><span>${esc(a.model ?? '-')} · ${esc(a.description)}</span></div>`).join('') || '<div class="empty">직원 없음</div>';
+  $('#memory').innerHTML = state.memory.map((m) => `<div><b>${esc(m.topic)}</b><span>${esc(m.title)} (${m.entries})</span></div>`).join('') || '<span style="color:var(--faint)">아직 없음</span>';
+  const r = state.runs;
+  $('#runs').innerHTML = r.total ? `<div><b>합계</b><span>${r.total}회</span></div>` + Object.entries(r.byAgent).map(([k, v]) => `<div><b>${esc(k)}</b><span>${v}회</span></div>`).join('') : '<span style="color:var(--faint)">아직 없음</span>';
+  const ws = $('#goalWorkspace'), cur = ws.value;
+  ws.innerHTML = '<option value="">없음</option>' + state.workspaces.map((w) => `<option${w === cur ? ' selected' : ''}>${esc(w)}</option>`).join('');
+  $('#projects').innerHTML = [...new Set(state.tasks.map((t) => t.project).filter(Boolean))].map((p) => `<option value="${esc(p)}">`).join('');
+}
+
+/* ---------- task detail ---------- */
+async function openTask(id) {
+  let d;
+  try { d = await api(`/api/task/${id}`); } catch (e) { return toast(e.message, true); }
+  const t = d.task;
+  $('#dlgTitle').innerHTML = `<span class="mono" style="color:var(--faint)">${t.id}</span> ${esc(t.title)}`;
+  const entries = d.log.trim().split(/\n(?=- \S+ \[)/).filter(Boolean).reverse().map((e) => {
+    const m = /^- (\S+) \[([^\]]+)\] ([^:\n]+)(?::\s?)?([\s\S]*)$/.exec(e);
+    if (!m) return `<div class="entry">${esc(e)}</div>`;
+    const body = m[4].split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n').trim();
+    return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(body)}</div>` : ''}</div>`;
+  }).join('');
+  const open = !['done', 'failed', 'canceled'].includes(t.status);
+  $('#dlgBody').innerHTML = `
+    <div class="tags" style="gap:8px">
+      <span class="chip s-${t.status}">${esc(t.label)}</span><span>담당 ${esc(t.assignee)}</span><span>지시 ${esc(t.created_by)}</span>
+      ${t.parent ? `<span>상위 <a href="#" data-open="${t.parent}">${t.parent}</a></span>` : ''}
+      ${t.project ? `<span>프로젝트 ${esc(t.project)}</span>` : ''}${t.workspace ? `<span>작업 공간 ${esc(t.workspace)}</span>` : ''}
+      <span>시도 ${t.attempts}/${t.max_attempts}</span><span>반려 ${t.rejections}/${t.max_rejections}</span>
+    </div>
+    ${d.children.length ? `<h4>하위 업무</h4>${d.children.map((c) => `<div class="trow" data-open="${c.id}"><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}` : ''}
+    <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
+    <div data-pane="brief" class="prose">${md(d.body)}</div>
+    <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint)">${(o.size / 1024).toFixed(1)}KB</span></button>`).join('')}</div><div id="fileView" class="prose" style="margin-top:12px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
+    <div data-pane="log" hidden class="loglist">${entries}</div>
+    <div data-pane="act" hidden class="feed" style="height:auto;max-height:50vh">${d.activity.length ? d.activity.map((l) => `<div>${esc(l)}</div>`).join('') : '<div class="empty">기록 없음</div>'}</div>
+    <h4>사용자 메모 · 조치</h4>
+    <textarea id="dlgNote" style="width:100%;min-height:50px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--bg)" placeholder="코멘트나 취소 사유"></textarea>
+    <div class="actions" style="display:flex;gap:6px;margin-top:6px">
+      <button class="btn" id="dlgComment">코멘트 남기기</button>
+      ${open ? '<button class="btn danger" id="dlgCancel">이 업무 취소</button>' : ''}
+    </div>`;
+  const body = $('#dlgBody');
+  body.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
+    body.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+    body.querySelectorAll('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== b.dataset.tab));
+  });
+  body.querySelectorAll('[data-file]').forEach((b) => b.onclick = async () => {
+    try {
+      const f = await api(`/api/task/${id}/file?path=${encodeURIComponent(b.dataset.file)}`);
+      $('#fileView').innerHTML = /\.(md|txt)$/i.test(b.dataset.file) ? md(f.text) : `<pre>${esc(f.text)}</pre>`;
+    } catch (e) { toast(e.message, true); }
+  });
+  body.querySelectorAll('[data-open]').forEach((el) => el.onclick = (ev) => { ev.preventDefault(); openTask(el.dataset.open); });
+  $('#dlgComment').onclick = () => { const v = $('#dlgNote').value.trim(); if (!v) return toast('내용을 적어 주세요', true); act(id, 'comment', { text: v }, '코멘트를 남겼습니다').then(() => openTask(id)); };
+  const cancel = $('#dlgCancel');
+  if (cancel) cancel.onclick = () => { if (!confirm(`${id} 와 그 하위 업무를 모두 취소할까요?`)) return; act(id, 'cancel', { reason: $('#dlgNote').value.trim() }, '취소했습니다').then(() => dlg.close()); };
+  if (!dlg.open) dlg.showModal();
+  if (d.outputs.length && ['done', 'failed'].includes(t.status)) {
+    body.querySelector('[data-tab="out"]').click();
+    const report = body.querySelector('[data-file="report.md"]') ?? body.querySelector('[data-file]');
+    report?.click();
+  }
+}
+
+/* ---------- goal composer ---------- */
+$('#goalSubmit').onclick = async () => {
+  const text = $('#goalText').value.trim();
+  if (!text) return toast('목표 내용을 적어 주세요', true);
+  try {
+    const r = await api('/api/goal', { text, workspace: $('#goalWorkspace').value, project: $('#goalProject').value.trim() });
+    $('#goalText').value = ''; toast(`목표 ${r.id} 를 등록했습니다`); refresh();
+  } catch (e) { toast(e.message, true); }
+};
+$('#goalText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#goalSubmit').click(); });
+
+/* ---------- live feed ---------- */
+const feed = $('#feed');
+function addFeed(line) {
+  const near = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  const m = /^\[([^\]]+)\]\s(.*)$/.exec(line);
+  const time = m ? m[1].replace(/^.*?(\d{1,2}:\d{2}:\d{2})$/, '$1') : '';
+  const text = m ? m[2] : line;
+  const div = document.createElement('div');
+  const cls = /^\s+T\d+ .* ▸ /.test(text) ? 'act' : /실행 시작|검수 시작/.test(text) ? 'start' : /^!!!|정지|오류|실패/.test(text) ? 'alert' : /알림:|완료|웹:/.test(text) ? 'note' : '';
+  if (cls) div.className = cls;
+  div.innerHTML = `<span class="t">${esc(time)}</span> ` + esc(text.trim()).replace(/\b(T\d{4})\b/g, '<span class="tid" data-open="$1">$1</span>');
+  feed.appendChild(div);
+  while (feed.childElementCount > 400) feed.firstChild.remove();
+  if (near) feed.scrollTop = feed.scrollHeight;
+}
+feed.addEventListener('click', (ev) => { const el = ev.target.closest('[data-open]'); if (el) openTask(el.dataset.open); });
+
+function connect() {
+  const es = new EventSource('/api/events');
+  es.addEventListener('log', (e) => addFeed(JSON.parse(e.data)));
+  es.addEventListener('changed', () => refresh());
+  es.onopen = () => ($('#feedState').textContent = '연결됨');
+  es.onerror = () => { $('#feedState').textContent = '재연결 중…'; };
+}
+
+async function refresh() {
+  try {
+    state = await api('/api/state');
+    renderHeader(); renderInbox(); renderBoard(); renderSide();
+    document.title = (state.inbox.approvals.length + state.inbox.questions.length ? `(${state.inbox.approvals.length + state.inbox.questions.length}) ` : '') + 'BusinessFactory';
+  } catch (e) { $('#engine').className = 'pill bad'; $('#engine').textContent = '서버 연결 끊김'; }
+}
+
+refresh(); connect();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

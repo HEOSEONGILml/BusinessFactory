@@ -11,6 +11,8 @@ import { addMemory, listMemory, readMemory } from './memory.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
 import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
+import { startWeb, statusLabel } from './web.ts';
+import { spawn } from 'node:child_process';
 import { resolvePaths } from './paths.ts';
 
 const HELP = `bf — BusinessFactory 업무 보드
@@ -28,6 +30,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf ack <id>                             완료된 목표 확인 처리
   bf usage [--days n]                     사용량 요약 (구독 사용 비율 포함)
   bf watch [<id>]                         직원들의 활동을 실시간으로 보기
+  bf web                                  웹 화면만 켜기 (엔진은 npm start)
 
 업무
   bf task create --to <직원> --title "<제목>" --done-when "<조건>" [--done-when ...]
@@ -489,11 +492,6 @@ function printStatus(board: Board, io: Io): void {
   if (snap) io.out(`\n${formatUsageSnapshot(snap)}`);
 }
 
-/** Blocked-on-approval reads as 결재대기, other blocks as 질문대기. */
-function statusLabel(t: Task): string {
-  return t.status === 'blocked' && t.approval ? '결재대기' : STATUS_LABEL[t.status];
-}
-
 function formatRow(t: Task): string {
   return `${t.id}  ${statusLabel(t).padEnd(5)} ${t.assignee.padEnd(12)} ${t.title}`;
 }
@@ -536,7 +534,19 @@ export async function runEngine(argv: string[], env: NodeJS.ProcessEnv = process
     }
   }
   fs.writeFileSync(pidFile, String(process.pid));
-  const engine = new Engine(paths, loadConfig(paths));
+  const config = loadConfig(paths);
+  const engine = new Engine(paths, config);
+  const web = config.web.enabled && !values.once
+    ? startWeb(paths, config, {
+        port: config.web.port,
+        engineStatus: () => ({
+          running: true,
+          pausedUntil: engine.pausedUntilTime?.toISOString() ?? null,
+          halted: engine.halted,
+        }),
+      })
+    : null;
+  if (web && config.web.open_browser) openBrowser(`http://127.0.0.1:${config.web.port}`);
   try {
     if (values.once) {
       await engine.runUntilIdle();
@@ -551,10 +561,18 @@ export async function runEngine(argv: string[], env: NodeJS.ProcessEnv = process
       await engine.loop(ac.signal);
     }
   } finally {
+    web?.close();
+    web?.closeAllConnections();
     fs.rmSync(lockDir, { recursive: true, force: true });
   }
   if (engine.pausedUntilTime) console.log(`사용량 한도로 ${engine.pausedUntilTime.toLocaleString()} 까지 대기 중이었습니다.`);
   return engine.halted ? 3 : 0;
+}
+
+function openBrowser(url: string): void {
+  const [cmd, args] =
+    process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
 }
 
 function isAlive(pid: number): boolean {
@@ -575,6 +593,11 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   if (argv[0] === 'engine') {
     runEngine(argv.slice(1)).then((code) => (process.exitCode = code));
+  } else if (argv[0] === 'web') {
+    const paths = resolvePaths();
+    const config = loadConfig(paths);
+    startWeb(paths, config, { port: config.web.port });
+    if (config.web.open_browser) openBrowser(`http://127.0.0.1:${config.web.port}`);
   } else if (argv[0] === 'watch') {
     const ac = new AbortController();
     process.once('SIGINT', () => ac.abort());
