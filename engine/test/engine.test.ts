@@ -29,8 +29,10 @@ function setup(plan: Record<string, string>, overrides: Partial<Config> = {}) {
   const fakeLog = path.join(root, 'fake.jsonl');
   const config: Config = { ...DEFAULT_CONFIG, claude_command: [process.execPath, FAKE], ...overrides };
   const logs: string[] = [];
+  const notices: { title: string; body: string }[] = [];
   const engine = new Engine(paths, config, {
     log: (l) => logs.push(l),
+    notify: (n) => notices.push(n),
     run: (spec) =>
       runAgent(spec, {
         ...process.env,
@@ -43,7 +45,7 @@ function setup(plan: Record<string, string>, overrides: Partial<Config> = {}) {
     fs.existsSync(fakeLog)
       ? fs.readFileSync(fakeLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
       : [];
-  return { root, paths, engine, board: engine.board, calls, logs };
+  return { root, paths, engine, board: engine.board, calls, logs, notices };
 }
 
 function goal(board: Engine['board'], title = '목표') {
@@ -65,6 +67,37 @@ describe('엔진', () => {
     );
     assert.ok(fs.existsSync(path.join(board.taskDir(g.id), 'output', 'report.md')));
     assert.match(calls()[3].prompt, /하위 업무가 모두 끝났습니다/);
+  });
+
+  it('사용자가 할 일이 생기면 한 번만 알린다', async () => {
+    const { engine, board, notices } = setup({ ceo: 'done', reviewer: 'pass' });
+    goal(board);
+    await engine.runUntilIdle();
+    engine.tick();
+    engine.tick();
+    assert.deepEqual(notices.map((n) => n.title), ['목표 완료 · T0001']);
+
+    // 결재 요청은 새로 생길 때마다 알린다
+    const g2 = goal(board, '두번째');
+    board.start(g2.id);
+    board.requestApproval('ceo', g2.id, '도메인 구매 1만원', []);
+    engine.tick();
+    engine.tick();
+    assert.equal(notices.length, 2);
+    assert.equal(notices[1].title, '결재 요청 · T0002');
+    assert.match(notices[1].body, /도메인 구매 1만원[\s\S]*bf approve 2/);
+  });
+
+  it('사용량 한도와 엔진 정지도 알린다', async () => {
+    const limited = setup({ ceo: 'limit' });
+    goal(limited.board);
+    await limited.engine.runUntilIdle();
+    assert.ok(limited.notices.some((n) => n.title === '사용량 한도로 휴식'));
+
+    const auth = setup({ ceo: 'auth' });
+    goal(auth.board);
+    await auth.engine.runUntilIdle();
+    assert.ok(auth.notices.some((n) => n.title.startsWith('엔진 정지')));
   });
 
   it('직원은 업무 폴더에서, 정리된 환경으로, 경로 제한 권한을 받아 실행된다', async () => {

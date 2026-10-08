@@ -32,6 +32,8 @@ Windows 명령 프롬프트/PowerShell 에서는 `bin\bf.cmd` 를 쓴다.
 | 사용량 보기 | `bf usage` |
 | 목표 취소 | `bf task cancel <번호>` |
 
+엔진이 켜져 있으면 결재 요청, 직원 질문, 목표 완료, 엔진 정지 때 Windows 알림이 뜬다. 휴대폰 알림은 `company/config.yaml` 의 `notify.ntfy_topic` 에 ntfy 주제 이름을 넣으면 켜진다.
+
 설정(동시 실행 수, 재시도 횟수 등)은 `company/config.yaml`, 정기 업무는 `company/schedules.yaml`.
 
 ## 주의

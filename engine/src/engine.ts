@@ -10,6 +10,8 @@ import { commitCompany, staffChanges, systemStatus } from './git.ts';
 import type { Paths } from './paths.ts';
 import { agentToolList, isUsageLimit, parseResetTime, runAgent } from './runner.ts';
 import { dueSchedules } from './schedule.ts';
+import { buildSender, OwnerNotifier } from './notify.ts';
+import type { Sender } from './notify.ts';
 import type { Access, RunResult, RunSpec } from './runner.ts';
 
 export type RunKind = 'work' | 'review';
@@ -19,6 +21,8 @@ export interface EngineOptions {
   run?: (spec: RunSpec) => Promise<RunResult>;
   now?: () => Date;
   log?: (line: string) => void;
+  /** Replaces desktop/phone notifications (tests). */
+  notify?: Sender;
 }
 
 interface ActiveRun {
@@ -51,6 +55,8 @@ export class Engine {
   private pausedUntil: Date | null = null;
   private haltReason: string | null = null;
   private systemSnapshot: string | null = null;
+  private readonly notify: Sender;
+  private readonly ownerNotifier: OwnerNotifier;
 
   constructor(paths: Paths, config: Config, opts: EngineOptions = {}) {
     this.paths = paths;
@@ -59,6 +65,8 @@ export class Engine {
     this.board = new Board(paths, config, this.now);
     this.run = opts.run ?? ((spec) => runAgent(spec));
     this.log = opts.log ?? ((line) => console.log(`[${this.now().toLocaleTimeString()}] ${line}`));
+    this.notify = opts.notify ?? buildSender(config.notify, this.log);
+    this.ownerNotifier = new OwnerNotifier(paths, this.notify);
   }
 
   get halted(): string | null {
@@ -84,6 +92,7 @@ export class Engine {
   tick(): void {
     if (this.haltReason) return;
     this.fireSchedules();
+    this.notifyOwner();
     if (this.pausedUntil) {
       if (this.now() < this.pausedUntil) return;
       this.log('사용량 한도 대기 종료, 재개');
@@ -280,6 +289,7 @@ export class Engine {
       this.pausedUntil = parseResetTime(`${r.text}\n${r.stderr}`, this.now());
       if (kind === 'work') this.board.requeue(taskId, `사용량 한도: ${r.text}`);
       this.log(`사용량 한도 도달. ${this.pausedUntil.toLocaleString()} 까지 대기`);
+      this.notify({ title: '사용량 한도로 휴식', body: `${this.pausedUntil.toLocaleString()} 에 자동으로 다시 일합니다.` });
       this.commit(`${taskId} 사용량 한도`);
       return;
     }
@@ -317,6 +327,7 @@ export class Engine {
 
     // Check before committing, or the commit would hide a tampered staff file.
     if (!this.checkIntegrity(taskId, agent.name)) return;
+    this.notifyOwner();
     this.commit(`${taskId} ${agent.name}: ${STATUS_LABEL[this.board.read(taskId).task.status]}`);
   }
 
@@ -369,6 +380,16 @@ export class Engine {
   private halt(reason: string): void {
     this.haltReason = reason;
     this.log(`!!! ${reason}`);
+    this.notify({ title: '엔진 정지 — 확인 필요', body: reason.slice(0, 300) });
+  }
+
+  /** Announce anything newly waiting on the owner (approvals, questions, finished goals). */
+  private notifyOwner(): void {
+    try {
+      this.ownerNotifier.check(this.board);
+    } catch (err) {
+      this.log(`알림 확인 실패: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 
