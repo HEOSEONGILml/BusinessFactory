@@ -1,6 +1,6 @@
 # BusinessFactory
 
-AI 직원들이 사람 대신 일하는 범용 업무 시스템. 사용자는 목표를 주고 결재만 한다. 설계는 [docs/DESIGN.md](docs/DESIGN.md) 참고.
+AI 직원들이 사람 대신 일하는 범용 업무 시스템. 사용자는 목표를 주고 결재만 한다. 설계는 [docs/DESIGN.md](docs/DESIGN.md), 서버 설치는 [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md) 참고.
 
 ## 요구 사항
 
