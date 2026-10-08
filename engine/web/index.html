@@ -452,6 +452,20 @@ function md(src) {
   }
   return out;
 }
+/**
+ * Employees often pass a whole request as one shell argument with no line breaks
+ * ("... 이유: ... 순서: 1) ... 2) ... 답변에 적을 것: ..."). Give such one-liners back their
+ * structure: labels become bold headings, inline steps become a list. Text that already
+ * has line breaks is left as written.
+ */
+function tidy(src) {
+  const s = String(src ?? '').trim();
+  if (s.includes('\n') || s.length < 120) return s;
+  return s
+    .replace(/\s+(이유|순서|방법|할 일|비용|기한|주의|참고|답변에 적을 것|답변 방법)\s*:\s*/g, '\n\n**$1**\n')
+    .replace(/(^|\s)(\d{1,2})\)\s+/g, '\n$2. ')
+    .replace(/\s*([①-⑳])\s*/g, '\n- $1 ');
+}
 
 /* ---------- header ---------- */
 function renderHeader() {
@@ -554,7 +568,7 @@ function renderInbox() {
     h += `<div class="card question" data-id="${q.id}" data-item="${q.item ?? ''}">
       <div class="kind">질문${part} <span>· ${q.id} · ${esc(q.assignee)}</span></div>
       <div class="title">${esc(q.title)}</div>
-      <div class="prose">${md(q.question)}</div>
+      <div class="prose">${md(tidy(q.question))}</div>
       ${q.answered !== null && q.answered !== undefined
         ? `<div class="meta" style="margin-top:8px">✅ 답변함: ${esc(q.answered)} <span class="hint">— 나머지 건에 모두 답하면 직원이 다시 일을 시작합니다</span></div>`
         : `<textarea placeholder="이 건에 대한 답변. 비밀값(API 키 등)은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
@@ -631,7 +645,7 @@ async function openTask(id) {
     const m = /^- (\S+) \[([^\]]+)\] ([^:\n]+)(?::\s?)?([\s\S]*)$/.exec(e);
     if (!m) return `<div class="entry">${esc(e)}</div>`;
     const body = m[4].split('\n').map((l) => l.replace(/^ {2}/, '')).join('\n').trim();
-    return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(body)}</div>` : ''}</div>`;
+    return `<div class="entry"><div class="h">${new Date(m[1]).toLocaleString()} · <b>${esc(m[2])}</b> · ${esc(m[3])}</div>${body ? `<div class="prose">${md(tidy(body))}</div>` : ''}</div>`;
   }).join('');
   const open = !terminal(t.status);
   $('#dlgBody').innerHTML = `
