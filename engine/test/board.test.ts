@@ -140,6 +140,44 @@ describe('업무 흐름', () => {
     assert.match(board.readLog(c.id), /답변: 마크다운/);
   });
 
+  it('하위 직원이 질문하면 기다리던 지시자를 깨우고, 끝내 답이 없으면 사용자에게 넘긴다', () => {
+    const { board } = makeBoard({ max_attempts: 2 });
+    const g = goal(board);
+    board.start(g.id);
+    const c = sub(board, g.id, 'ceo');
+    board.finishRun(g.id, 'delegated');
+    assert.equal(board.read(g.id).task.status, 'waiting');
+
+    board.start(c.id);
+    board.ask('worker', c.id, '어느 시장부터?');
+    assert.equal(board.read(g.id).task.status, 'pending', '지시자가 깨어난다');
+    assert.equal(board.read(g.id).task.attempts, 0);
+
+    // 지시자가 답하지 않고 끝내면 다시 시도한다
+    board.start(g.id);
+    assert.equal(board.finishRun(g.id, 'no answer').status, 'pending');
+    board.start(g.id);
+    // 시도 한도 소진 → 질문을 사용자에게 넘기고 하위 대기
+    assert.equal(board.finishRun(g.id, 'no answer').status, 'waiting');
+    assert.equal(board.read(c.id).task.ask_to, 'owner');
+    assert.equal(board.answer('owner', c.id, '코인부터').status, 'pending');
+  });
+
+  it('하위 업무로 진전이 생기면 시도 횟수를 다시 센다', () => {
+    const { board } = makeBoard({ max_attempts: 2 });
+    const g = goal(board);
+    for (let round = 0; round < 3; round++) {
+      board.start(g.id);
+      const c = sub(board, g.id, 'ceo', 'worker', { review: false });
+      board.finishRun(g.id, 'delegated');
+      board.start(c.id);
+      board.done('worker', c.id, 'ok');
+      assert.equal(board.read(g.id).task.attempts, 0);
+    }
+    board.start(g.id);
+    assert.equal(board.finishRun(g.id, '보고 없음').status, 'pending', '세 번 깨어났어도 실패하지 않는다');
+  });
+
   it('반려되면 대기로 돌아가고, 반려 한도를 넘으면 실패 처리 후 상위를 깨운다', () => {
     const { board } = makeBoard({ max_rejections: 2 });
     const g = goal(board);

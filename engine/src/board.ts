@@ -319,6 +319,16 @@ export class Board {
       this.transition(doc, 'blocked');
       this.save(doc);
       this.log(id, actor, '질문', `→ ${doc.task.ask_to}: ${question}`);
+      // The asker's manager is usually waiting on this very task; wake it up to answer.
+      if (doc.task.parent && doc.task.ask_to !== this.config.owner) {
+        const parent = this.read(doc.task.parent);
+        if (parent.task.status === 'waiting' && parent.task.assignee === doc.task.ask_to) {
+          parent.task.attempts = 0;
+          this.transition(parent, 'pending');
+          this.save(parent);
+          this.log(parent.task.id, 'system', '재개', `하위 업무 ${id} 에 질문이 있음`);
+        }
+      }
       return doc.task;
     });
   }
@@ -335,6 +345,7 @@ export class Board {
       }
       if (!text.trim()) throw new BoardError('답변 내용이 비어 있습니다.');
       doc.task.ask_to = null;
+      doc.task.attempts = 0; // progress: count failed runs afresh
       this.transition(doc, 'pending');
       this.save(doc);
       this.log(id, actor, '답변', text);
@@ -494,6 +505,23 @@ export class Board {
       if (doc.task.status !== 'running') return doc.task;
       const open = this.children(id).filter((c) => !isTerminal(c.status));
       if (open.length > 0) {
+        const unanswered = open.filter((c) => c.status === 'blocked' && !c.approval && c.ask_to === doc.task.assignee);
+        if (unanswered.length > 0) {
+          if (doc.task.attempts < doc.task.max_attempts) {
+            // Waiting would deadlock: the children are waiting on us.
+            this.transition(doc, 'pending');
+            this.save(doc);
+            this.log(id, 'engine', '재시도대기', `하위 업무 ${unanswered.map((c) => c.id).join(', ')} 의 질문에 답하지 않고 종료`);
+            return doc.task;
+          }
+          // Repeatedly couldn't answer: hand the questions to the owner instead.
+          for (const c of unanswered) {
+            const childDoc = this.read(c.id);
+            childDoc.task.ask_to = this.config.owner;
+            this.save(childDoc);
+            this.log(c.id, 'system', '질문이관', `${doc.task.assignee} 가 답하지 못해 사용자에게 넘김`);
+          }
+        }
         this.transition(doc, 'waiting');
         this.save(doc);
         this.log(id, 'engine', '하위대기', `하위 업무 ${open.map((c) => c.id).join(', ')} 완료 대기`);
@@ -542,6 +570,7 @@ export class Board {
     const parentDoc = this.read(task.parent);
     if (parentDoc.task.status !== 'waiting') return;
     if (this.children(task.parent).some((c) => !isTerminal(c.status))) return;
+    parentDoc.task.attempts = 0; // progress: count failed runs afresh
     this.transition(parentDoc, 'pending');
     this.save(parentDoc);
     this.log(task.parent, 'system', '재개', '하위 업무가 모두 종료되어 결과 취합 차례');

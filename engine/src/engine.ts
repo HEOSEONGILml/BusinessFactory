@@ -253,6 +253,12 @@ export class Engine {
     ];
     if (workspaceDir) lines.push(`- 작업 공간: ${workspaceDir}`);
     const kids = this.board.children(task.id);
+    const questions = kids.filter((k) => k.status === 'blocked' && !k.approval && k.ask_to === task.assignee);
+    if (questions.length > 0) {
+      lines.push(
+        `- 하위 업무 ${questions.map((k) => k.id).join(', ')} 에서 당신에게 질문이 왔습니다. \`bf task show <번호>\` 로 질문을 읽고 \`bf task answer <번호> "<답>"\` 으로 답하세요. 당신도 모르는 사용자 판단이 필요하면 \`bf task ask ${task.id} "<질문>"\` 으로 위에 물으세요.`,
+      );
+    }
     if (kids.length > 0 && kids.every((k) => isTerminal(k.status))) {
       lines.push(
         `- 맡긴 하위 업무가 모두 끝났습니다. 각 하위 업무의 결과물(${this.paths.board}${path.sep}<번호>${path.sep}output)과 이력을 확인해 취합하세요.`,
