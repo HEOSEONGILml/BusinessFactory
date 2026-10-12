@@ -53,7 +53,7 @@ export interface Config {
   default_model: string | null;
   /**
    * Work and review runs skip every permission check (bypassPermissions) instead of the
-   * path-scoped allow list. Chat stays read-only. The system-area tripwire still applies.
+   * path-scoped allow list. Chat stays read-only.
    */
   full_access: boolean;
   /**

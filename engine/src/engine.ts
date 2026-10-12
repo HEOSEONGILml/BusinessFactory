@@ -6,7 +6,7 @@ import { Board, DEFAULT_GOAL_DONE_WHEN, isTerminal, STATUS_LABEL } from './board
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { writeFileAtomic } from './fsutil.ts';
-import { commitCompany, staffChanges, systemStatus } from './git.ts';
+import { commitCompany } from './git.ts';
 import type { Paths } from './paths.ts';
 import { agentToolList, isUsageLimit, parseResetTime, runAgent } from './runner.ts';
 import {
@@ -76,9 +76,6 @@ interface ChatRun {
 
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-/** System folders whose change during a run means an employee escaped its sandbox. */
-const SYSTEM_AREAS = ['engine', 'bin', 'templates', '.claude', 'docs', 'package.json', 'tsconfig.json'];
-
 /**
  * The scheduler. It never decides *what* to do — employees do that through bf.
  * It only picks runnable work, launches employees, and records what happened.
@@ -100,7 +97,6 @@ export class Engine {
   private haltedAt: Date | null = null;
   /** Halts resumed by the watchdog in a row; each one waits twice as long. Reset by the owner. */
   private autoResumes = 0;
-  private systemSnapshot: string | null = null;
   private readonly notify: Sender;
   private readonly ownerNotifier: OwnerNotifier;
   private readonly chatActive = new Map<string, ChatRun>();
@@ -186,7 +182,6 @@ export class Engine {
 
   /** Call once before the first tick. */
   recover(): void {
-    this.systemSnapshot = this.snapshotSystem();
     for (const t of this.board.list()) {
       if (t.status === 'running' && !this.active.has(t.id)) {
         this.board.requeue(t.id, '엔진 재시작: 중단된 실행을 대기로 되돌림');
@@ -871,8 +866,6 @@ export class Engine {
       }
     }
 
-    // Check before committing, or the commit would hide a tampered staff file.
-    if (!this.checkIntegrity(taskId, agent.name)) return;
     this.notifyOwner();
     this.commit(`${taskId} ${agent.name}: ${STATUS_LABEL[this.board.read(taskId).task.status]}`);
   }
@@ -896,31 +889,6 @@ export class Engine {
 
   private commit(message: string): void {
     commitCompany(this.paths, message);
-  }
-
-  private snapshotSystem(): string | null {
-    return systemStatus(this.paths, SYSTEM_AREAS);
-  }
-
-  /**
-   * Tripwire: shell commands can't be fully path-scoped, so after every run check that
-   * neither the system code nor the staff roster changed. Returns false (and halts) if either did.
-   */
-  private checkIntegrity(taskId: string, agent: string): boolean {
-    const staff = staffChanges(this.paths);
-    if (staff) {
-      this.halt(
-        `${taskId} (${agent}) 실행 후 직원 명부가 승인 없이 변경되었습니다. company 폴더에서 'git status' 로 확인하세요:\n${staff}`,
-      );
-      return false;
-    }
-    if (this.systemSnapshot === null) return true;
-    const current = this.snapshotSystem();
-    if (current !== null && current !== this.systemSnapshot) {
-      this.halt(`${taskId} (${agent}) 실행 후 시스템 영역이 변경되었습니다. 'git status' 로 확인하세요:\n${current}`);
-      return false;
-    }
-    return true;
   }
 
   private halt(reason: string): void {

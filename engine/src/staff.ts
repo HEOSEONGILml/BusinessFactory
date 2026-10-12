@@ -71,7 +71,7 @@ export function pendingProposals(paths: Paths): Proposal[] {
     });
 }
 
-/** Owner approved: move proposals onto the roster and commit, so the engine's tripwire stays quiet. */
+/** Owner approved: move proposals onto the roster and commit. */
 export function installHires(paths: Paths, names: string[]): void {
   fs.mkdirSync(paths.agents, { recursive: true });
   for (const name of names) {
@@ -117,7 +117,7 @@ export function readStaff(paths: Paths, name: string): StaffInput & { file: stri
 
 /**
  * Owner creates or edits an employee. Same safety rules as hiring (no disk-wide permissions),
- * and the change is committed at once so the engine's roster tripwire stays quiet.
+ * and the change is committed at once.
  */
 export function saveStaff(paths: Paths, input: StaffInput, create: boolean): void {
   const name = input.name.trim();

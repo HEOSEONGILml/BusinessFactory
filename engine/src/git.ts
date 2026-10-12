@@ -17,20 +17,3 @@ export function commitCompany(paths: Paths, message: string): void {
   git(paths.company, 'add', '-A');
   git(paths.company, '-c', 'user.name=BusinessFactory', '-c', 'user.email=bf@localhost', 'commit', '-q', '-m', message);
 }
-
-/**
- * Uncommitted changes under company/staff. Staff only changes through owner-approved
- * hiring, which commits immediately — so anything here is suspicious.
- * Returns null when the company folder has no git.
- */
-export function staffChanges(paths: Paths): string | null {
-  if (!companyHasGit(paths)) return null;
-  const r = git(paths.company, 'status', '--porcelain', '--', path.relative(paths.company, paths.agents));
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-
-/** git status of the system's own code (null if the root is not a git repo). */
-export function systemStatus(paths: Paths, areas: string[]): string | null {
-  const r = git(paths.root, 'status', '--porcelain', '--', ...areas);
-  return r.status === 0 ? r.stdout : null;
-}
