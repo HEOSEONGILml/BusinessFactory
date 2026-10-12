@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Board, BoardError, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
-import { dmId, ensureDm, postMessage } from './chat.ts';
+import { dmId, ensureDm, ensureMissionChannel, postMessage } from './chat.ts';
 import type { Config } from './config.ts';
 import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.ts';
 import { withLock, writeFileAtomic } from './fsutil.ts';
@@ -161,6 +161,19 @@ export function readJournal(paths: Paths, id: string): string {
 export function appendJournal(paths: Paths, id: string, now: Date, heading: string, lines: string[] = []): void {
   const text = [`## ${heading} · ${now.toISOString()}`, '', ...lines, ''].join('\n') + '\n';
   fs.appendFileSync(journalFile(paths, id), text, 'utf8');
+  shareInChannel(paths, id, heading, lines);
+}
+
+/** Every journal entry is also shared, briefly, in the mission's channel (#m001). Best-effort. */
+function shareInChannel(paths: Paths, id: string, heading: string, lines: string[]): void {
+  try {
+    const m = missionExists(paths, id) ? readMission(paths, id).mission : null;
+    const conv = ensureMissionChannel(paths, id, m?.title ?? null, m?.project ?? null);
+    const body = clip(lines.join('\n').trim(), 1500);
+    postMessage(paths, conv.id, 'ceo', `🎯 **${id} ${heading}**${body ? `\n\n${body}` : ''}`, { chain: 99, kind: 'system' });
+  } catch {
+    // sharing is best-effort; the journal keeps the record
+  }
 }
 
 export interface CreateMissionInput {

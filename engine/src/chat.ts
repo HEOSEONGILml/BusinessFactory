@@ -88,6 +88,31 @@ export function ensureChannel(paths: Paths, name: string, project: string | null
   return conv;
 }
 
+/** Every mission has its own channel (#m001) where its progress is shared. */
+export function ensureMissionChannel(paths: Paths, missionId: string, title?: string | null, project: string | null = null): Conversation {
+  const name = missionId.toLowerCase();
+  const conv = ensureChannel(paths, name, project);
+  const want = title ? `#${name} · ${title}` : `#${name}`;
+  if (title && conv.title !== want) {
+    conv.title = want;
+    saveConv(paths, conv);
+  }
+  return conv;
+}
+
+/** Where a task's progress is shared: its mission's channel, else its project's channel, else #general. */
+export function channelForTask(paths: Paths, task: { mission?: string | null; project: string | null }): Conversation {
+  if (task.mission) return ensureMissionChannel(paths, task.mission);
+  if (task.project) {
+    try {
+      return ensureChannel(paths, task.project, task.project);
+    } catch {
+      // project names that cannot be channel names share in #general
+    }
+  }
+  return ensureChannel(paths, 'general');
+}
+
 export function dmId(a: string, b: string): string {
   const [x, y] = [a, b].sort();
   return `d-${x}--${y}`;

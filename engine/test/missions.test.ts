@@ -99,6 +99,33 @@ describe('미션 루프', () => {
     assert.ok(notices.some((n) => n.title === '미션 M001 달성'));
   });
 
+  it('미션마다 채널(#m001)이 생기고, 진행 기록과 하위 업무 결과가 그 채널에 공유된다', async () => {
+    const { engine, paths } = setup({ ceo: 'step', worker: 'done', reviewer: 'pass' }, {}, { FAKE_ACHIEVE_AT: '2' });
+    createMission(paths, 'owner', { title: 'MAU 1000', brief: 'b' }, new Date());
+    await engine.runUntilIdle();
+    const ch = readMessages(paths, 'c-m001', 500);
+    assert.ok(ch.length > 0);
+    assert.ok(ch.every((x) => x.kind === 'system'), '공유에는 답장 실행이 붙지 않는다');
+    assert.ok(ch.some((x) => /M001 등록/.test(x.text)));
+    assert.ok(ch.some((x) => /M001 단계 1 시작/.test(x.text)));
+    assert.ok(ch.some((x) => /M001 단계 1 · T0001 · 완료/.test(x.text)));
+    assert.ok(ch.some((x) => /✅ \*\*완료\*\* T\d+ \(T0001 하위\)/.test(x.text)), '하위 업무 결과도 미션 채널로');
+    assert.match(JSON.parse(fs.readFileSync(path.join(paths.company, 'chat', 'c-m001.json'), 'utf8')).title, /#m001 · MAU 1000/);
+  });
+
+  it('미션이 아닌 업무는 프로젝트 채널(없으면 #general)에 결과가 한 번만 공유된다', async () => {
+    const { engine, board, paths } = setup({ worker: 'done', reviewer: 'pass' });
+    const a = board.createTask('owner', { title: '일반 목표', assignee: 'worker', doneWhen: DONE_WHEN, parent: null });
+    const b = board.createTask('owner', { title: '프로젝트 목표', assignee: 'worker', doneWhen: DONE_WHEN, parent: null, project: 'shop' });
+    await engine.runUntilIdle();
+    engine.tick();
+    const general = readMessages(paths, 'c-general', 500).filter((x) => x.text.includes(a.id));
+    assert.equal(general.length, 1);
+    assert.match(general[0].text, /✅ \*\*완료\*\*/);
+    assert.equal(readMessages(paths, 'c-shop', 500).filter((x) => x.text.includes(b.id)).length, 1);
+    assert.equal(board.read(a.id).task.announced, true);
+  });
+
   it('달성 제안이 검수에서 반려되면 제안이 취소되고 미션은 계속된다', () => {
     const { board, paths, bf } = setup({});
     const m = createMission(paths, 'owner', { title: 'm', brief: 'b' }, new Date());

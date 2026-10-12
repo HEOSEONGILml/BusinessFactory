@@ -80,6 +80,8 @@ export interface Task {
   acknowledged?: boolean;
   /** Asked for in the messenger: the result goes back to that conversation. */
   origin?: TaskOrigin | null;
+  /** Engine shared the result in the task's messenger channel. */
+  announced?: boolean;
   /** The task's own git worktree on its workspace (config worktrees). */
   worktree?: TaskWorktree | null;
   /** Mission this task works for (steps get it from the engine, subtasks inherit it). Absent on older tasks. */
@@ -572,6 +574,16 @@ export class Board {
       if (!doc.task.origin) return doc.task;
       doc.task.origin.reported = true;
       if (seen && doc.task.status === 'done' && doc.task.parent === null) doc.task.acknowledged = true;
+      this.save(doc);
+      return doc.task;
+    });
+  }
+
+  /** Engine: the task's result was shared in its messenger channel. */
+  markAnnounced(id: string): Task {
+    return this.locked(() => {
+      const doc = this.read(id);
+      doc.task.announced = true;
       this.save(doc);
       return doc.task;
     });

@@ -14,6 +14,7 @@ import {
   endMeeting,
   ensureChannel,
   ensureDm,
+  ensureMissionChannel,
   getConv,
   lastMessage,
   listConvs,
@@ -266,6 +267,13 @@ function chatList(board: Board, paths: Paths) {
       ensureChannel(paths, p, p);
     } catch {
       // project names that cannot be channel names simply get no channel
+    }
+  }
+  for (const m of listMissions(paths)) {
+    try {
+      ensureMissionChannel(paths, m.id, m.title, m.project);
+    } catch {
+      // best-effort
     }
   }
   return listConvs(paths)

@@ -10,6 +10,7 @@ import { commitCompany } from './git.ts';
 import type { Paths } from './paths.ts';
 import { agentToolList, isUsageLimit, parseResetTime, runAgent } from './runner.ts';
 import {
+  channelForTask,
   dueReplies,
   getConv,
   listConvs,
@@ -202,6 +203,7 @@ export class Engine {
     if (this.haltReason && !this.autoResume()) return;
     this.notifyOwner();
     this.reportOrigins();
+    this.announceWork();
     this.cleanWorktrees();
     if (!this.enabled) return;
     this.fireSchedules();
@@ -344,6 +346,52 @@ export class Engine {
       }
       this.board.markOriginReported(t.id);
     }
+  }
+
+  /**
+   * Every task that ends is shared briefly in its channel (mission → #m001, project → #project,
+   * otherwise #general). Mission steps are covered by the mission journal, which is shared too.
+   * Tasks that ended before this feature existed (company/chat/.announce-since) are skipped.
+   */
+  private announceWork(): void {
+    const since = this.announceSince();
+    for (const t of this.board.list()) {
+      if (t.announced || !isTerminal(t.status) || t.updated_at < since) continue;
+      try {
+        const step = t.parent === null && !!t.mission;
+        const conv = step ? null : channelForTask(this.paths, t);
+        // Already answered in this very conversation by reportOrigins.
+        if (conv && t.origin?.conv !== conv.id) {
+          const log = this.board.readLog(t.id);
+          const n = t.parent === null ? 800 : 300;
+          const head = `${t.id}${t.parent ? ` (${t.parent} 하위)` : ''} — ${t.title} · ${t.assignee}`;
+          const text =
+            t.status === 'done'
+              ? `✅ **완료** ${head}\n\n${truncate(lastLogEntry(log, '완료보고') || '(요약 없음)', n)}`
+              : t.status === 'failed'
+                ? `❌ **실패** ${head}\n\n${truncate(lastLogEntry(log, '실패') || '(사유 없음)', n)}`
+                : `🚫 **취소** ${head}`;
+          const from = t.assignee === this.config.owner ? t.created_by : t.assignee;
+          postMessage(this.paths, conv.id, from, text, { chain: this.config.chat.max_chain, kind: 'system' });
+        }
+      } catch (e) {
+        this.log(`${t.id} 결과를 채널에 공유하지 못함: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      this.board.markAnnounced(t.id);
+    }
+  }
+
+  private announceSinceCache: string | null = null;
+
+  private announceSince(): string {
+    if (this.announceSinceCache) return this.announceSinceCache;
+    const file = path.join(this.paths.company, 'chat', '.announce-since');
+    if (!fs.existsSync(file)) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, this.now().toISOString() + '\n');
+    }
+    this.announceSinceCache = fs.readFileSync(file, 'utf8').trim();
+    return this.announceSinceCache;
   }
 
   /** A request made in a comment thread: answer there, or in the task's history once the thread is settled. */
