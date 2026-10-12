@@ -699,11 +699,12 @@ function threadUI(x) {
     const me = e.from === state.owner;
     return `<div class="cmt${me ? ' me' : ''}"><div class="h"><b>${me ? '나' : esc(e.from)}</b> · ${when(e.at)}</div><div class="prose">${md(tidy(e.text))}</div></div>`;
   });
-  if (x.thread.at(-1)?.from === state.owner) {
-    items.push(`<div class="cmt typing">💬 ${esc(x.assignee)} ${x.replying ? '이(가) 코멘트를 쓰고 있습니다…' : '이(가) 곧 확인합니다 (엔진이 켜져 있어야 합니다)'}</div>`);
-  }
-  const earlier = x.earlier?.length ? `<details class="hire"><summary>이전 코멘트 ${x.earlier.filter((e) => !e.event).length}건</summary>${threadHistory(x.earlier)}</details>` : '';
-  return earlier + (items.length ? `<div class="thread">${items.join('')}</div>` : '');
+  // The reply-in-progress note stays outside the toggle so it shows even when the comments are folded.
+  const typing = x.thread.at(-1)?.from === state.owner
+    ? `<div class="thread"><div class="cmt typing">💬 ${esc(x.assignee)} ${x.replying ? '이(가) 코멘트를 쓰고 있습니다…' : '이(가) 곧 확인합니다 (엔진이 켜져 있어야 합니다)'}</div></div>` : '';
+  const earlier = x.earlier?.length ? `<details class="hire" data-fold="earlier"><summary>이전 코멘트 ${x.earlier.filter((e) => !e.event).length}건</summary>${threadHistory(x.earlier)}</details>` : '';
+  if (!items.length && !earlier) return typing;
+  return `<details class="hire" data-fold="cmt" open><summary>코멘트 ${items.length}건</summary>${earlier}${items.length ? `<div class="thread">${items.join('')}</div>` : ''}</details>${typing}`;
 }
 async function postComment(card) {
   const id = card.dataset.id, item = card.dataset.item ? Number(card.dataset.item) : null;
@@ -798,7 +799,7 @@ function renderInbox() {
     const ta = card.querySelector('textarea'), k = inboxKey(card);
     if (ta && drafts.has(k)) ta.value = drafts.get(k);
     card.querySelectorAll('details').forEach((d, i) => {
-      const dk = `${k}#${i}`;
+      const dk = `${k}#${d.dataset.fold ?? i}`;
       present.add(dk);
       if (inboxFolds.has(dk)) d.open = inboxFolds.get(dk);
     });
@@ -817,7 +818,8 @@ function saveInboxFolds() { try { localStorage.setItem('bf-inbox-folds', JSON.st
 $('#inbox').addEventListener('toggle', (ev) => {
   const d = ev.target, card = d.closest?.('.card');
   if (!(d instanceof HTMLDetailsElement) || !card) return;
-  const i = [...card.querySelectorAll('details')].indexOf(d);
+  // Named toggles (comments) keep their key when other toggles come and go; the rest go by position.
+  const i = d.dataset.fold ?? [...card.querySelectorAll('details')].indexOf(d);
   inboxFolds.set(`${inboxKey(card)}#${i}`, d.open);
   saveInboxFolds();
 }, true);
