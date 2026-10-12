@@ -129,6 +129,20 @@ describe('엔진', () => {
     void paths;
   });
 
+  it('full_access 이면 권한 검사 없이 실행하고, 모델이 없는 직원은 default_model 을 쓴다', async () => {
+    const { engine, board, calls, paths } = setup({ ceo: 'done', reviewer: 'pass' }, { full_access: true, default_model: 'claude-opus-5-5' });
+    fs.writeFileSync(path.join(paths.agents, 'ceo.md'), '---\nname: ceo\ndescription: test ceo\n---\n테스트 직원\n');
+    goal(board);
+    await engine.runUntilIdle();
+    const [work, review] = calls();
+    for (const c of [work, review]) {
+      assert.equal(c.args[c.args.indexOf('--permission-mode') + 1], 'bypassPermissions');
+      assert.ok(!c.args.includes('--allowedTools'));
+    }
+    const defs = JSON.parse(fs.readFileSync(work.args[work.args.indexOf('--agents') + 1], 'utf8'));
+    assert.equal(defs.ceo.model, 'claude-opus-5-5');
+  });
+
   it('보고 없이 끝나면 재시도하고, 한도를 넘으면 실패한다', async () => {
     const { engine, board, calls } = setup({ ceo: 'silent' }, { max_attempts: 2 });
     goal(board);

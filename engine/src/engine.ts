@@ -333,7 +333,8 @@ export class Engine {
     const def: Record<string, unknown> = { description: agent.description || agent.name, prompt: agent.prompt };
     const tools = agentToolList(talker);
     if (tools) def.tools = tools;
-    if (agent.model) def.model = agent.model;
+    const model = agent.model ?? this.config.default_model;
+    if (model) def.model = model;
     writeFileAtomic(agentsFile, JSON.stringify({ [agent.name]: def }, null, 2));
     return {
       command: this.config.claude_command,
@@ -750,7 +751,8 @@ export class Engine {
     const def: Record<string, unknown> = { description: agent.description || agent.name, prompt: agent.prompt };
     const tools = agentToolList(agent);
     if (tools) def.tools = tools;
-    if (agent.model) def.model = agent.model;
+    const model = agent.model ?? this.config.default_model;
+    if (model) def.model = model;
     writeFileAtomic(agentsFile, JSON.stringify({ [agent.name]: def }, null, 2));
 
     return {
@@ -762,6 +764,7 @@ export class Engine {
       access,
       // Approved grants apply to the assignee's own work, never to the reviewer.
       grants: kind === 'work' ? (task.grants ?? []) : [],
+      fullAccess: this.config.full_access,
       handbook: fs.existsSync(this.paths.handbook) ? this.paths.handbook : null,
       maxTurns: this.config.max_turns,
       timeoutMs: this.config.run_timeout_minutes * 60_000,

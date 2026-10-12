@@ -206,6 +206,8 @@ claude -p --agents <정의.json> --agent <직원> --output-format json
 
 - 권한 목록에 도구 이름만 넣으면(`Write`, `Read`, `Bash`) **디스크 전체 권한**이 된다. 그래서 절대 넣지 않는다.
 - 파일 권한은 경로 규칙으로만 준다.
+- **전체 권한 모드**: `config.yaml`의 `full_access: true`면 업무·검수 실행을 `--permission-mode bypassPermissions`로 돌리고 아래 경로 규칙과 `--allowedTools`를 쓰지 않는다. 대화용 실행은 그대로 읽기 전용이고, 시스템 영역 감시 장치도 그대로다. 결재 대상 행동(비용, 외부 공개, 계정, 삭제)은 핸드북 규칙으로만 막힌다.
+- 직원 정의에 `model`이 없으면 `config.yaml`의 `default_model`을 쓴다.
 
 | 실행 | 쓰기 (`Edit(경로/**)`) | 읽기 (`Read(경로/**)`) |
 |---|---|---|

@@ -49,6 +49,13 @@ export interface Config {
   notify: NotifyConfig;
   /** Command that starts Claude Code; extra elements are leading arguments. */
   claude_command: string[];
+  /** Model for employees whose definition names none. */
+  default_model: string | null;
+  /**
+   * Work and review runs skip every permission check (bypassPermissions) instead of the
+   * path-scoped allow list. Chat stays read-only. The system-area tripwire still applies.
+   */
+  full_access: boolean;
   /**
    * Self-recovery. auto_resume_minutes: after a halt, switch back on by itself after this long
    * (doubling each time in a row, up to 6 hours; 0 = wait for the owner). stale_seconds: `bf engine-check`
@@ -74,6 +81,8 @@ export const DEFAULT_CONFIG: Config = {
   web: { enabled: true, port: 4300, open_browser: true, allowed_hosts: [] },
   chat: { max_concurrency: 2, max_chain: 3, max_turns: 12, timeout_minutes: 5, meeting_turns_per_participant: 2 },
   claude_command: ['claude'],
+  default_model: null,
+  full_access: false,
   watchdog: { auto_resume_minutes: 10, stale_seconds: 120 },
 };
 

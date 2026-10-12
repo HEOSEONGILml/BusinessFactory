@@ -70,6 +70,8 @@ export interface RunSpec {
   timeoutMs: number;
   /** Owner-approved permission rules for this task only. */
   grants: string[];
+  /** Skip all permission checks (config full_access); access and grants are then ignored. */
+  fullAccess?: boolean;
   /** Extra environment for the employee (BF_ACTOR, BF_TASK, ...). */
   env: Record<string, string>;
   /** Prepended to PATH so the employee can call `bf`. */
@@ -101,11 +103,11 @@ export function buildArgs(spec: RunSpec): string[] {
     '--agent', spec.agent.name,
     '--output-format', 'stream-json',
     '--verbose',
-    '--permission-mode', 'dontAsk',
+    '--permission-mode', spec.fullAccess ? 'bypassPermissions' : 'dontAsk',
     '--strict-mcp-config',
     '--max-turns', String(spec.maxTurns),
-    '--allowedTools', ...buildAllowedTools(spec.agent, spec.access, spec.grants),
   ];
+  if (!spec.fullAccess) args.push('--allowedTools', ...buildAllowedTools(spec.agent, spec.access, spec.grants));
   // The working directory is already trusted; extra dirs must be added explicitly.
   for (const dir of [...spec.access.write, ...spec.access.read]) {
     if (path.resolve(dir) !== path.resolve(spec.cwd)) args.push('--add-dir', dir);
