@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BusinessFactory</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
@@ -77,6 +77,20 @@ section.panel { background: var(--panel); border: 1px solid var(--line); border-
 .grid { display: grid; grid-template-columns: minmax(340px, 1fr) minmax(420px, 1.35fr) minmax(360px, 1.1fr); gap: 20px; align-items: start; margin-top: 20px; }
 @media (max-width: 1280px) { .grid { grid-template-columns: 1fr 1fr; } .feed-col { grid-column: 1 / -1; } }
 @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } header, main { padding-left: 14px; padding-right: 14px; } .meters { margin-left: 0; } }
+/* Phone: the header scrolls away and stays two short rows; view tabs move to a bottom bar. */
+@media (max-width: 800px) {
+  header { position: static; gap: 8px 12px; padding-top: 8px; padding-bottom: 8px; }
+  .brand { font-size: 16px; } .brand small { display: none; }
+  .engine-ctl { margin-left: auto; }
+  .meters { width: 100%; gap: 14px; flex-wrap: nowrap; }
+  .meter { min-width: 0; flex: 1; font-size: 12.5px; }
+  .meter b { font-size: 13px; } .meter small { display: none; } .meter .bar { height: 5px; margin-top: 3px; }
+  nav.views { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel); border-top: 1px solid var(--line);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+  nav.views button { flex: 1; padding: 10px 0; }
+  main { padding-top: 14px; padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  #toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
 
 /* ---------- office ---------- */
 .office { background:
@@ -598,7 +612,7 @@ function renderHeader() {
     const pct = Math.round(v.utilization * 100);
     const cls = pct >= 80 ? 'high' : pct >= 50 ? 'mid' : '';
     const reset = new Date(v.resetsAt * 1000).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    return `<div class="meter ${cls}"><div class="top"><span>${labels[k] ?? k} <b>${pct}%</b></span><small>${reset} 리셋</small></div>
+    return `<div class="meter ${cls}" title="${reset} 리셋"><div class="top"><span>${labels[k] ?? k} <b>${pct}%</b></span><small>${reset} 리셋</small></div>
       <div class="bar"><i style="width:${Math.min(pct, 100)}%"></i></div></div>`;
   }).join('') : '<div class="meter">구독 사용량은 직원이 한 번 일하면 표시됩니다</div>';
 }
