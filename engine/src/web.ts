@@ -191,6 +191,7 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
       body: board.read(t.id).body,
       waitingOn: t.depends_on.filter((d) => byId.get(d)?.status !== 'done'),
       files: prerequisiteFiles(board, paths, t),
+      filesPending: pendingPrerequisites(board, t),
     }));
   const finished = tasks
     .filter((t) => board.finishedForOwner(t))
@@ -314,6 +315,7 @@ function taskDetail(board: Board, paths: Paths, id: string) {
     activity,
     outputs,
     prereqFiles: board.isOwnerTask(task) ? prerequisiteFiles(board, paths, task) : [],
+    prereqPending: board.isOwnerTask(task) ? pendingPrerequisites(board, task) : [],
     children: board.children(id).map((c) => ({ id: c.id, title: c.title, status: c.status, label: statusLabel(c), assignee: c.assignee })),
     // Every task below this one, depth-first, with its history: one timeline for the whole tree.
     tree: descendants(board, id).map(({ task: c, depth }) => ({
@@ -373,6 +375,18 @@ export function downloadPath(paths: Paths, p: string): string {
   }
   if (!fs.statSync(real).isFile()) throw new BoardError('파일만 내려받을 수 있습니다.');
   return real;
+}
+
+/** Prerequisites that have not reported a result yet, so their files cannot be attached so far. */
+export function pendingPrerequisites(board: Board, task: Task): string[] {
+  return task.depends_on.filter((dep) => {
+    try {
+      const st = board.read(dep).task.status;
+      return st !== 'done' && st !== 'review';
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**

@@ -121,6 +121,9 @@ describe('웹 화면', () => {
     board.start(g.id);
     const build = board.createTask('ceo', { title: '빌드', assignee: 'worker', doneWhen: ['x'], parent: g.id });
     const upload = board.createTask('ceo', { title: '콘솔에 올리기', assignee: 'owner', doneWhen: ['x'], parent: g.id, dependsOn: [build.id] });
+    const before = (await (await fetch(BASE + '/api/state')).json()).inbox.mine.find((m: { id: string }) => m.id === upload.id);
+    assert.deepEqual(before.files, [], '선행 업무가 끝나기 전엔 파일 없음');
+    assert.deepEqual(before.filesPending, [build.id], '끝나면 붙는다고 안내할 선행 업무');
     board.start(build.id);
     const ait = path.join(paths.workspaces, 'proj', 'web', 'app.ait');
     fs.mkdirSync(path.dirname(ait), { recursive: true });
@@ -138,6 +141,8 @@ describe('웹 화면', () => {
     assert.ok(!got.some((p: string) => p.endsWith('.env')), '비밀 파일은 빼기');
     const d = await (await fetch(`${BASE}/api/task/${upload.id}`)).json();
     assert.deepEqual(d.prereqFiles.map((f: { path: string }) => f.path), got);
+    assert.deepEqual(card.filesPending, [], '보고가 끝나면 대기 안내 없음');
+    assert.deepEqual(d.prereqPending, []);
   });
 
   it('미션 탭: 등록·목록·일시정지·재개·중지', async () => {

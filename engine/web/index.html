@@ -737,10 +737,13 @@ async function postComment(card) {
   await refresh();
 }
 /* Files from the work an owner task builds on, as download links right on the card. */
-function prereqFilesUI(files) {
-  if (!files?.length) return '';
+function prereqFilesUI(files, pending) {
+  const wait = pending?.length
+    ? `<div style="margin-top:6px;color:var(--faint)">⏳ ${pending.map((d) => `<a href="#" data-open="${d}">${d}</a>`).join(', ')} 이(가) 끝나면 만든 파일이 여기에 자동으로 붙습니다</div>` : '';
+  if (!files?.length && !wait) return '';
   const name = (p) => p.split('/').slice(-2).join('/');
-  return `<div class="meta" style="margin:8px 0">📎 받을 파일 (선행 업무 결과, 누르면 내려받기)<div class="files" style="margin-top:6px">${files.map((f) => `<a class="btn small dl" href="${downloadUrl(f.path)}" download title="${esc(f.path)}">⬇ ${esc(name(f.path))} <span style="color:var(--faint);font-weight:500">${esc(f.from)}</span></a>`).join(' ')}</div></div>`;
+  const links = files?.length ? `<div class="files" style="margin-top:6px">${files.map((f) => `<a class="btn small dl" href="${downloadUrl(f.path)}" download title="${esc(f.path)}">⬇ ${esc(name(f.path))} <span style="color:var(--faint);font-weight:500">${esc(f.from)}</span></a>`).join(' ')}</div>` : '';
+  return `<div class="meta" style="margin:8px 0">📎 받을 파일 (선행 업무 결과, 누르면 내려받기)${links}${wait}</div>`;
 }
 function renderInbox() {
   const { approvals, mine, questions, finished } = state.inbox;
@@ -773,7 +776,7 @@ function renderInbox() {
       <div class="kind">내가 할 일 <span>· ${m.id} · ${esc(m.assignee)} 요청${m.parent ? ` · ${m.parent} 하위` : ''}</span></div>
       <div class="title">${esc(m.title)}</div>
       ${m.waitingOn.length ? `<div class="meta">⏳ 먼저 끝낼 일: ${m.waitingOn.map((d) => `<a href="#" data-open="${d}">${d}</a>`).join(', ')}</div>` : ''}
-      ${prereqFilesUI(m.files)}
+      ${prereqFilesUI(m.files, m.filesPending)}
       <details class="hire"${m.thread.length ? '' : ' open'}><summary>할 일 보기</summary><div class="prose" style="margin-top:8px">${md(tidy(m.body))}</div></details>
       ${threadUI(m)}
       <textarea placeholder="궁금한 점을 코멘트로 달면 ${esc(m.assignee)} 이(가) 바로 답합니다. 다 하셨으면 결과를 적고 '완료 보고'를 누르세요. 비밀값은 여기 쓰지 말고 파일에 직접 넣으세요."></textarea>
@@ -995,7 +998,7 @@ async function openTask(id, from) {
     </div>
     ${d.tree.length ? `<h4>하위 업무 ${d.tree.length}건</h4><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${d.tree.map((c, k) => `<div class="trow" data-open="${c.id}" style="padding-left:${14 + (c.depth - 1) * 20}px${k === 0 ? ';border-top:none' : ''}"><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee === state.owner ? '나' : c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}</div>` : ''}
     <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="cmt">코멘트 (${d.thread.filter((e) => !e.event).length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
-    <div data-pane="brief">${prereqFilesUI(d.prereqFiles)}<div class="prose">${md(d.body)}</div></div>
+    <div data-pane="brief">${prereqFilesUI(d.prereqFiles, d.prereqPending)}<div class="prose">${md(d.body)}</div></div>
     <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<span class="fitem"><button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint);font-weight:500">${(o.size / 1024).toFixed(1)}KB</span></button><a class="btn small" href="/api/task/${id}/file?download=1&path=${encodeURIComponent(o.path)}" download title="내 PC로 내려받기">⬇</a></span>`).join('')}</div><div id="fileView" class="prose" style="margin-top:16px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
     <div data-pane="cmt" hidden>${threadHistory(d.thread)}</div>
     <div data-pane="log" hidden>
