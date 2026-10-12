@@ -179,7 +179,7 @@ describe('엔진', () => {
     // 사용자의 요청이 없으면 등록하지 않는다
     assert.match(bfAs({ BF_ACTOR: 'worker', BF_CHAT: dm.id }, args).err, /사용자가 이 대화에서 부탁한 일이 없습니다/);
     // 업무 실행 중에는 bf chat task 를 쓰지 않는다
-    assert.match(bfAs({ BF_ACTOR: 'worker' }, args).err, /메신저·회의에서 답할 때만/);
+    assert.match(bfAs({ BF_ACTOR: 'worker' }, args).err, /메신저·회의·코멘트에서 답할 때만/);
 
     postMessage(paths, dm.id, 'owner', 'README 오타 좀 고쳐 줘', { chain: 0 });
     const r = bfAs({ BF_ACTOR: 'worker', BF_CHAT: dm.id }, args);
@@ -199,6 +199,42 @@ describe('엔진', () => {
     assert.equal(reports.length, 1);
     assert.equal(reports[0].from, 'worker');
     assert.match(reports[0].text, /T0001 완료/);
+  });
+
+  it('끝난 목표의 코멘트에서 부탁한 일도 업무가 되고, 결과가 그 코멘트에 올라온다', async () => {
+    const { engine, board, root, calls } = setup({ ceo: 'done', worker: 'done', reviewer: 'pass' });
+    const g = goal(board);
+    await engine.runUntilIdle();
+    assert.equal(board.read(g.id).task.status, 'done');
+    const bfAs = (env: Record<string, string>, args: string[]) => {
+      const err: string[] = [];
+      const code = main(args, { BF_ROOT: root, ...env }, { out: () => {}, err: (s) => err.push(s) });
+      return { code, err: err.join('\n') };
+    };
+    const args = ['chat', 'task', '--to', 'worker', '--title', '스크린샷 3장', '--done-when', '3장이 있다', '--no-review'];
+    assert.match(bfAs({ BF_ACTOR: 'ceo', BF_THREAD: g.id }, args).err, /코멘트에서 부탁한 일이 없습니다/);
+
+    board.threadPost('owner', g.id, '심사용으로 3장 알아서 만들어');
+    await engine.runUntilIdle();
+    const reply = calls().find((c) => c.prompt.startsWith('[코멘트]'))!;
+    assert.match(reply.prompt, /bf chat task/, '코멘트 답변에서 업무를 등록하는 법을 안내한다');
+
+    const r = bfAs({ BF_ACTOR: 'ceo', BF_THREAD: g.id }, args);
+    assert.equal(r.code, 0, r.err);
+    const t = board.list().find((x) => x.title === '스크린샷 3장')!;
+    assert.equal(t.parent, null);
+    assert.equal(t.origin?.conv, `task:${g.id}`);
+    assert.match(board.read(t.id).body, new RegExp(`업무 ${g.id}`));
+
+    await engine.runUntilIdle();
+    const after = board.read(t.id).task;
+    assert.equal(after.status, 'done');
+    assert.equal(after.acknowledged, true, '코멘트에 보고된 성공은 처리할 일에 남기지 않는다');
+    const last = board.openThread(g.id).at(-1)!;
+    assert.equal(last.from, 'ceo');
+    assert.match(last.text, new RegExp(`${t.id} 완료`));
+    const work = calls().find((c) => c.task === t.id && c.agent === 'worker')!;
+    assert.match(work.prompt, new RegExp(`업무 ${g.id} 의 코멘트에서 부탁한 일`));
   });
 
   it('보고 없이 끝나면 재시도하고, 한도를 넘으면 실패한다', async () => {

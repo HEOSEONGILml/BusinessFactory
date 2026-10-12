@@ -319,8 +319,9 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
 const MAX_TASKS_PER_REQUEST = 5;
 
 /**
- * `bf chat task`: in a messenger reply or meeting, register work the owner asked for. It becomes a
- * top-level task tied to that owner message, and its result is posted back to the conversation.
+ * `bf chat task`: wherever the owner asks for work — a messenger reply, a meeting, or a comment
+ * on any inbox item (even a finished goal) — register it. It becomes a top-level task tied to the
+ * owner's request, and its result is posted back where it was asked.
  */
 function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: string[]): number {
   const { board, actor, io } = ctx;
@@ -338,34 +339,49 @@ function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: s
       priority: { type: 'string' },
     },
   });
-  const convId = env.BF_CHAT;
-  if (!convId) throw new BoardError('bf chat task 는 메신저·회의에서 답할 때만 씁니다. 업무 중에는 bf task create 를 쓰세요.');
   const owner = board.config.owner;
   if (actor === owner) throw new BoardError('사용자는 bf goal 로 목표를 등록하세요.');
-  const conv = getConv(board.paths, convId);
-  const request = lastOwnerMessage(board.paths, convId, owner);
-  if (!request) throw new BoardError('사용자가 이 대화에서 부탁한 일이 없습니다. 업무는 사용자의 요청이 있을 때만 등록합니다.');
-  const already = board.list().filter((t) => t.origin?.conv === convId && t.origin.message === request.id);
+  let origin: { conv: string; message: string };
+  let where: string;
+  let defaults: { project: string | null; workspace: string | null };
+  if (env.BF_CHAT) {
+    const conv = getConv(board.paths, env.BF_CHAT);
+    const request = lastOwnerMessage(board.paths, conv.id, owner);
+    if (!request) throw new BoardError('사용자가 이 대화에서 부탁한 일이 없습니다. 업무는 사용자의 요청이 있을 때만 등록합니다.');
+    origin = { conv: conv.id, message: request.id };
+    const label = conv.kind === 'dm' ? 'DM' : conv.kind === 'meeting' ? `회의 "${conv.title}"` : `채널 ${conv.title}`;
+    where = `${label} 에서 사용자 요청 (대화 맥락: \`bf chat read ${conv.id}\`)`;
+    defaults = { project: conv.project ?? null, workspace: null };
+  } else if (env.BF_THREAD) {
+    const source = board.read(env.BF_THREAD).task;
+    const request = board.thread(source.id).filter((e) => !e.event && e.from === owner).at(-1);
+    if (!request) throw new BoardError('사용자가 이 코멘트에서 부탁한 일이 없습니다. 업무는 사용자의 요청이 있을 때만 등록합니다.');
+    origin = { conv: `task:${source.id}`, message: String(request.n) };
+    where = `업무 ${source.id} "${source.title}" 의 코멘트에서 사용자 요청 (맥락: \`bf task show ${source.id}\`, 결과물: ${source.id} 의 output/)`;
+    defaults = { project: source.project ?? null, workspace: source.workspace ?? null };
+  } else {
+    throw new BoardError('bf chat task 는 메신저·회의·코멘트에서 답할 때만 씁니다. 업무 중에는 bf task create 를 쓰세요.');
+  }
+  const already = board.list().filter((t) => t.origin?.conv === origin.conv && t.origin.message === origin.message);
   if (already.length >= MAX_TASKS_PER_REQUEST) {
     throw new BoardError(`이 요청으로 이미 업무 ${already.length}건(${already.map((t) => t.id).join(', ')})을 만들었습니다.`);
   }
   const assignee = values.to ?? actor;
   if (!names.includes(assignee)) throw new BoardError(`존재하지 않는 직원입니다: ${assignee}`);
-  const where = conv.kind === 'dm' ? 'DM' : conv.kind === 'meeting' ? `회의 "${conv.title}"` : `채널 ${conv.title}`;
   const task = board.createTask(actor, {
     title: values.title ?? '',
     assignee,
-    description: `${values.desc?.trim() || '(없음)'}\n\n출처: ${where} 에서 사용자 요청 (대화 맥락: \`bf chat read ${conv.id}\`)`,
+    description: `${values.desc?.trim() || '(없음)'}\n\n출처: ${where}`,
     doneWhen: values['done-when'] ?? [],
     dependsOn: (values.depends ?? []).flatMap((d) => d.split(',')).filter(Boolean),
     review: !values['no-review'],
-    workspace: values.workspace,
-    project: values.project ?? conv.project ?? undefined,
+    workspace: values.workspace ?? defaults.workspace ?? undefined,
+    project: values.project ?? defaults.project ?? undefined,
     priority: values.priority === undefined ? undefined : parsePriority(values.priority),
     parent: null,
-    origin: { conv: conv.id, message: request.id },
+    origin,
   });
-  io.out(`업무 등록: ${task.id} → ${task.assignee} (끝나면 결과가 이 대화에 올라옵니다)`);
+  io.out(`업무 등록: ${task.id} → ${task.assignee} (끝나면 결과가 ${env.BF_CHAT ? '이 대화' : '이 코멘트'}에 올라옵니다)`);
   return 0;
 }
 

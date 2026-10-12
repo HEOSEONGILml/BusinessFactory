@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAgent, listAgents } from './agents.ts';
 import type { AgentInfo } from './agents.ts';
-import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
+import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, lastLogEntry, originThreadTask, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { writeFileAtomic } from './fsutil.ts';
@@ -316,6 +316,13 @@ export class Engine {
             : t.status === 'failed'
               ? `❌ **${t.id} 실패** — ${t.title}\n\n${truncate(lastLogEntry(log, '실패') || '(사유 없음)', 1000)}\n\n처리할 일에서 확인해 주세요.`
               : `🚫 **${t.id} 취소됨** — ${t.title}`;
+        const source = originThreadTask(t.origin);
+        if (source) {
+          // Shown in the thread: the result counts as seen. Settled thread: keep it in the inbox too.
+          const shown = this.reportToThread(source, t, text);
+          this.board.markOriginReported(t.id, shown);
+          continue;
+        }
         const conv = getConv(this.paths, t.origin.conv);
         // A DM only takes its two members; fall back to whoever took the request there.
         const from = conv.kind === 'dm' && !conv.members.includes(t.assignee) ? t.created_by : t.assignee;
@@ -326,6 +333,22 @@ export class Engine {
       }
       this.board.markOriginReported(t.id);
     }
+  }
+
+  /** A request made in a comment thread: answer there, or in the task's history once the thread is settled. */
+  private reportToThread(sourceId: string, t: Task, text: string): boolean {
+    const source = this.board.read(sourceId).task;
+    const from = this.board.responder(source);
+    let shown = true;
+    try {
+      this.board.threadPost(from, sourceId, text);
+      this.notify({ title: `코멘트 · ${sourceId} · ${from}`, body: text.slice(0, 200) });
+    } catch {
+      this.board.comment(from, sourceId, text);
+      shown = false;
+    }
+    this.log(`💬 ${sourceId} 코멘트 ← ${t.id} 결과 보고 (${STATUS_LABEL[t.status]})`);
+    return shown;
   }
 
   /** Meetings speak one at a time; outside meetings, DMs and @mentions get replies. */
@@ -485,7 +508,7 @@ export class Engine {
     const taskDir = this.board.taskDir(task.id);
     const read = [taskDir, this.paths.board, this.paths.memory];
     if (task.workspace) read.push(path.join(this.paths.workspaces, task.workspace));
-    const spec = this.talkSpec(agent, 'thread', this.threadPrompt(task, agent.name, item), taskDir, read, {});
+    const spec = this.talkSpec(agent, 'thread', this.threadPrompt(task, agent.name, item), taskDir, read, { BF_THREAD: task.id });
     spec.onEvent = (ev) => {
       if (ev.kind === 'activity') {
         entry.activity = ev.text;
@@ -527,7 +550,12 @@ export class Engine {
       '- 최종 출력은 코멘트 본문 그대로입니다. 인사말, 서명, 따옴표 없이 씁니다.',
       '- 질문에는 직접 답하고, 사용자의 말을 어떻게 이해했는지와 그래서 무엇을 할지 짧고 구체적으로 씁니다. 필요한 것이 더 있으면 물어봅니다.',
       `- 사실 확인이 필요하면 \`bf task show ${task.id}\` 와 파일 읽기로 확인합니다. 추측은 추측이라고 밝힙니다.`,
-      '- 지금은 코멘트만 답니다. 업무 상태를 바꾸는 bf 명령(done, ask, answer 등)은 쓰지 마세요. 진행 여부는 사용자가 답변 확정·승인·확인 버튼으로 정합니다.',
+      '- **사용자가 일을 부탁하거나 지시하면 (이 업무가 끝난 뒤라도) 그 자리에서 업무로 등록합니다.** 버튼을 누르라거나 새 목표를 따로 만들라고 되돌려 보내지 않습니다:',
+      '  `bf chat task --title "<할 일 한 문장>" --desc "<배경, 요청 내용, 참고 경로>" --done-when "<검수자가 파일만 보고 판정할 조건>" [--to <직원>] [--workspace <작업 공간>] [--no-review]`',
+      '  - 담당: 내 직무면 생략(자신), 다른 직무면 --to <직원>, 여러 단계·여러 직무가 필요한 큰 일이면 --to ceo. 작업 공간은 생략하면 이 업무의 것을 씁니다.',
+      '  - 등록했으면 코멘트에 업무 번호와 무엇을 하기로 했는지 한두 문장으로 알립니다. 끝나면 결과가 이 코멘트에 자동으로 올라온다고 덧붙입니다.',
+      '  - 사용자가 부탁하지 않은 일은 등록하지 않습니다. 필요해 보이면 제안하고, 사용자가 하자고 하면 등록합니다. 요청이 모호해 방향이 갈릴 때만 되묻습니다.',
+      '- 질문에 대한 답변 확정, 결재 승인, 결과 확인은 사용자가 화면의 버튼으로 합니다. 이 업무의 상태를 바꾸는 bf 명령(done, ask, answer 등)은 쓰지 마세요.',
       '- bf 로 따로 코멘트를 남기지 마세요. 최종 출력이 곧 코멘트입니다.',
     ].join('\n');
   }
@@ -875,7 +903,12 @@ export class Engine {
         `- node_modules, .env, 빌드 결과물 같은 git 제외 파일은 원래 작업 공간과 링크로 공유됩니다.`,
       );
     }
-    if (task.origin) {
+    const threadSource = originThreadTask(task.origin);
+    if (threadSource) {
+      lines.push(
+        `- 이 업무는 사용자가 업무 ${threadSource} 의 코멘트에서 부탁한 일입니다. 맥락은 \`bf task show ${threadSource}\` 로, 그 업무의 결과물은 ${this.board.taskDir(threadSource)}/output/ 에서 보세요. 끝나면 완료 보고 요약이 그 코멘트에 자동으로 올라가니, 요약은 사용자에게 답하듯 쓰세요.`,
+      );
+    } else if (task.origin) {
       lines.push(
         `- 이 업무는 사용자가 메신저에서 부탁한 일입니다. 맥락이 필요하면 \`bf chat read ${task.origin.conv}\` 로 대화를 읽으세요. 끝나면 완료 보고 요약이 그 대화에 자동으로 올라가니, 요약은 사용자에게 답하듯 쓰세요.`,
       );

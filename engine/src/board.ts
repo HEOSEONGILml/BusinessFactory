@@ -97,9 +97,9 @@ export interface TaskWorktree {
 }
 
 export interface TaskOrigin {
-  /** Conversation the owner asked in. */
+  /** Conversation the owner asked in, or `task:<id>` for a comment thread on that task. */
   conv: string;
-  /** The owner's message that asked for it. */
+  /** The owner's message (or thread entry number) that asked for it. */
   message: string;
   /** The result has been posted back to the conversation. */
   reported?: boolean;
@@ -162,6 +162,11 @@ export interface CreateTaskInput {
   parent: string | null;
   /** Set when an employee registers work the owner asked for in the messenger. */
   origin?: { conv: string; message: string } | null;
+}
+
+/** The task whose comment thread a request came from, or null for messenger requests. */
+export function originThreadTask(origin: { conv: string } | null | undefined): string | null {
+  return origin?.conv.startsWith('task:') ? origin.conv.slice(5) : null;
 }
 
 /** The full text of the newest log entry of one kind (entries can span several lines). */
@@ -529,12 +534,12 @@ export class Board {
    * Engine: the result of a messenger request was posted back to its conversation. A success
    * counts as seen there; a failure or cancellation stays in the inbox.
    */
-  markOriginReported(id: string): Task {
+  markOriginReported(id: string, seen = true): Task {
     return this.locked(() => {
       const doc = this.read(id);
       if (!doc.task.origin) return doc.task;
       doc.task.origin.reported = true;
-      if (doc.task.status === 'done' && doc.task.parent === null) doc.task.acknowledged = true;
+      if (seen && doc.task.status === 'done' && doc.task.parent === null) doc.task.acknowledged = true;
       this.save(doc);
       return doc.task;
     });
