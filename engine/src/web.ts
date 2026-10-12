@@ -22,6 +22,22 @@ import {
   postMessage,
   readMessages,
 } from './chat.ts';
+import {
+  charterOf,
+  createMission,
+  descendantsOf,
+  listMissions,
+  MISSION_STATUS_LABEL,
+  missionShare,
+  missionSteps,
+  missionUsage,
+  normalizeMissionId,
+  pauseMission,
+  readJournal,
+  readMission,
+  resumeMission,
+  stopMission,
+} from './missions.ts';
 import type { Paths } from './paths.ts';
 import { discardHires, installHires, KNOWN_TOOLS, pendingProposals, readStaff, removeStaff, saveStaff } from './staff.ts';
 import { readUsage } from './usage.ts';
@@ -174,7 +190,7 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
       files: prerequisiteFiles(board, paths, t),
     }));
   const finished = tasks
-    .filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && t.status !== 'canceled')
+    .filter((t) => board.finishedForOwner(t))
     .map((t) => ({ ...thread(t, null), id: t.id, assignee: t.assignee, title: t.title, status: t.status, label: statusLabel(t) }));
 
   const since = Date.now() - 7 * 86_400_000;
@@ -213,6 +229,33 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
     // Where downloadable files live, so the page can turn file paths in text into download links.
     files: { root: paths.root, dirs: [paths.board, paths.workspaces] },
   };
+}
+
+/** The mission tab: each mission with its steps, usage and the tail of its journal. */
+export function missionsState(board: Board, paths: Paths) {
+  const missions = listMissions(paths);
+  const tasks = board.list();
+  const usage = missionUsage(paths, tasks, Date.now() - 7 * 86_400_000);
+  return missions.map((m) => {
+    const journal = readJournal(paths, m.id);
+    const share = missionShare(board.config, missions, m);
+    return {
+      ...m,
+      label: MISSION_STATUS_LABEL[m.status],
+      charter: charterOf(readMission(paths, m.id).body),
+      usage7d: usage.get(m.id) ?? 0,
+      share,
+      steps: missionSteps(tasks, m.id).map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        label: statusLabel(t),
+        tasks: descendantsOf(tasks, t.id).length,
+        proposal: t.mission_proposal?.kind ?? null,
+      })),
+      journal: journal.length > 20_000 ? '…' + journal.slice(-20_000) : journal,
+    };
+  });
 }
 
 /** Conversation list for the messenger sidebar; #general and one channel per project always exist. */
@@ -255,6 +298,7 @@ function taskDetail(board: Board, paths: Paths, id: string) {
     thread: board.thread(id),
     owner: {
       inInbox: board.awaitsOwner(task),
+      canComment: board.canComment(task),
       responder: board.responder(task),
       canReopen: board.isOwnerTask(task) && (task.status === 'done' || task.status === 'canceled') &&
         !(task.parent && isTerminal(board.read(task.parent).task.status)),
@@ -445,9 +489,10 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
     finish: (id, b) => board.done(owner, id, String(b.text ?? '')),
     reopen: (id, b) => board.reopen(owner, id, String(b.reason ?? '')),
     cancel: (id, b) => board.cancel(owner, id, String(b.reason ?? '')),
-    // On an inbox item a comment joins its thread, so the employee answers it.
+    // On an inbox item or unfinished work a comment joins its thread, so the employee answers it
+    // (and the next work run reads it). Only on settled, finished tasks is it a history note.
     comment: (id, b) =>
-      board.awaitsOwner(board.read(id).task) ? board.threadPost(owner, id, String(b.text ?? '')) : board.comment(owner, id, String(b.text ?? '')),
+      board.canComment(board.read(id).task) ? board.threadPost(owner, id, String(b.text ?? '')) : board.comment(owner, id, String(b.text ?? '')),
     thread: (id, b) => board.threadPost(owner, id, String(b.text ?? ''), Number.isInteger(b.item) ? b.item : null),
   };
 
@@ -544,6 +589,9 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
         const speaking = (engineStatus().active ?? []).filter((r) => r.kind === 'chat' && r.taskId === conv.id).map((r) => ({ agent: r.agent, activity: r.activity ?? null }));
         return send(res, 200, { conv, messages: readMessages(paths, conv.id, 300), speaking });
       }
+      if (req.method === 'GET' && url.pathname === '/api/missions') {
+        return send(res, 200, { missions: missionsState(board, paths) });
+      }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         return streamEvents(req, res, board, paths);
       }
@@ -571,6 +619,27 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
           });
           log(`웹: 목표 등록 ${t.id}`);
           return send(res, 200, { id: t.id });
+        }
+        if (url.pathname === '/api/mission') {
+          const m = createMission(paths, owner, {
+            title: String(body.title ?? ''),
+            brief: String(body.brief ?? ''),
+            until: body.until ? String(body.until) : null,
+            weight: body.weight ? Number(body.weight) : undefined,
+            project: body.project || null,
+            workspace: body.workspace || null,
+          }, new Date());
+          log(`웹: 미션 등록 ${m.id}`);
+          return send(res, 200, { id: m.id });
+        }
+        if (parts[0] === 'api' && parts[1] === 'mission' && parts[2] && ['pause', 'resume', 'stop'].includes(parts[3])) {
+          const id = normalizeMissionId(parts[2]);
+          const now = new Date();
+          if (parts[3] === 'pause') pauseMission(paths, id, owner, String(body.reason ?? ''), now);
+          else if (parts[3] === 'resume') resumeMission(paths, id, owner, now);
+          else stopMission(board, id, owner, String(body.reason ?? ''), body.cancelRunning === true, now);
+          log(`웹: 미션 ${id} ${parts[3]}`);
+          return send(res, 200, { ok: true });
         }
         const names = listAgents(paths).map((a) => a.name);
         if (url.pathname === '/api/engine/start' || url.pathname === '/api/engine/stop') {
@@ -702,7 +771,14 @@ function streamEvents(req: http.IncomingMessage, res: http.ServerResponse, board
         ? fs.statSync(path.join(paths.company, '.engine-usage.json')).mtimeMs
         : 0;
       const staff = fs.existsSync(paths.agents) ? fs.readdirSync(paths.agents).join(',') : '';
-      const sig = `${tasks.length}|${tasks.map((t) => t.updated_at).sort().pop() ?? ''}|${usage}|${staff}`;
+      const missionsDir = path.join(paths.company, 'missions');
+      const missions = fs.existsSync(missionsDir)
+        ? fs.readdirSync(missionsDir).map((d) => {
+            const f = path.join(missionsDir, d, 'journal.md');
+            return fs.existsSync(f) ? `${d}:${fs.statSync(f).mtimeMs}:${fs.statSync(path.join(missionsDir, d)).mtimeMs}` : d;
+          }).join(',')
+        : '';
+      const sig = `${tasks.length}|${tasks.map((t) => t.updated_at).sort().pop() ?? ''}|${usage}|${staff}|${missions}`;
       if (sig !== signature) {
         if (signature) res.write(`event: changed\ndata: {}\n\n`);
         signature = sig;

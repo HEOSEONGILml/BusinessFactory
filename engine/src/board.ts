@@ -82,6 +82,13 @@ export interface Task {
   origin?: TaskOrigin | null;
   /** The task's own git worktree on its workspace (config worktrees). */
   worktree?: TaskWorktree | null;
+  /** Mission this task works for (steps get it from the engine, subtasks inherit it). Absent on older tasks. */
+  mission?: string | null;
+  /**
+   * A mission step's proposal that the mission is achieved or stalled. It takes effect only
+   * when the step passes review (docs/MISSIONS.md); a rejection clears it.
+   */
+  mission_proposal?: MissionProposal | null;
   created_at: string;
   updated_at: string;
 }
@@ -103,6 +110,12 @@ export interface TaskOrigin {
   message: string;
   /** The result has been posted back to the conversation. */
   reported?: boolean;
+}
+
+export interface MissionProposal {
+  kind: 'achieve' | 'stall';
+  text: string;
+  at: string;
 }
 
 export interface Question {
@@ -162,6 +175,8 @@ export interface CreateTaskInput {
   parent: string | null;
   /** Set when an employee registers work the owner asked for in the messenger. */
   origin?: { conv: string; message: string } | null;
+  /** Mission id (engine-created steps); subtasks inherit their parent's. */
+  mission?: string | null;
 }
 
 /** The task whose comment thread a request came from, or null for messenger requests. */
@@ -288,9 +303,11 @@ export class Board {
         if (isTerminal(parent.status)) {
           throw new BoardError(`${parent.id} 는 이미 종료된 업무입니다.`);
         }
-        if (!forOwner && parent.depth + 1 > this.config.max_depth) {
+        // null (or no setting) = no fixed limit; a number keeps the old cap.
+        const maxDepth = this.config.max_depth;
+        if (!forOwner && typeof maxDepth === 'number' && parent.depth + 1 > maxDepth) {
           throw new BoardError(
-            `위임 깊이 한도(${this.config.max_depth})를 넘습니다. 직접 수행하거나 상위에 보고하세요.`,
+            `위임 깊이 한도(${maxDepth})를 넘습니다. 직접 수행하거나 상위에 보고하세요.`,
           );
         }
       }
@@ -325,6 +342,7 @@ export class Board {
         approval: null,
         acknowledged: false,
         origin: input.origin ? { conv: input.origin.conv, message: input.origin.message } : null,
+        ...((input.mission ?? parent?.mission) ? { mission: input.mission ?? parent?.mission } : {}),
         created_at: ts,
         updated_at: ts,
       };
@@ -401,6 +419,13 @@ export class Board {
       this.requireStatus(doc.task, 'running');
       const list = items.map((s) => s.trim()).filter(Boolean);
       if (!question.trim() && list.length === 0) throw new BoardError('질문 내용이 비어 있습니다.');
+      if (doc.task.mission && doc.task.parent === null && !toOwner && actor !== this.config.owner) {
+        // A step was handed out by the engine: an ordinary question would land on the owner and stall the mission.
+        throw new BoardError(
+          '미션 단계에는 맡긴 사람이 없습니다. 판단이 필요하면 합리적으로 가정하고 진행한 뒤 보고에 적으세요. ' +
+            '사용자만 할 수 있는 일은 사용자 업무(bf task create --to owner)로 맡기고, 정말 사용자 답 없이는 한 걸음도 못 갈 때만 --owner 로 물으세요.',
+        );
+      }
       doc.task.ask_to = toOwner ? this.config.owner : doc.task.created_by;
       doc.task.questions = list.length > 1 ? list.map((text, i) => ({ id: i + 1, text, answer: null })) : null;
       this.transition(doc, 'blocked');
@@ -545,6 +570,31 @@ export class Board {
     });
   }
 
+  /** A mission step proposes that its mission is achieved or stalled (effective once the step passes review). */
+  proposeMission(actor: string, id: string, kind: MissionProposal['kind'], text: string): Task {
+    return this.locked(() => {
+      const doc = this.read(id);
+      this.requireAssignee(actor, doc.task);
+      this.requireStatus(doc.task, 'running');
+      if (!doc.task.mission || doc.task.parent !== null) throw new BoardError(`${id} 는 미션 단계가 아닙니다.`);
+      if (!text.trim()) throw new BoardError('근거가 필요합니다.');
+      doc.task.mission_proposal = { kind, text: text.trim(), at: this.timestamp() };
+      this.save(doc);
+      this.log(id, actor, kind === 'achieve' ? '미션달성제안' : '미션정체선언', text);
+      return doc.task;
+    });
+  }
+
+  /**
+   * A finished top-level goal the owner still has to look at. Finished mission steps are not:
+   * the mission reports cover them (failed ones still count).
+   */
+  finishedForOwner(task: Task): boolean {
+    return (
+      task.parent === null && isTerminal(task.status) && !task.acknowledged && task.status !== 'canceled' && !(task.mission && task.status === 'done')
+    );
+  }
+
   /** Engine: record the task's worktree (or that it was removed). */
   setWorktree(id: string, worktree: TaskWorktree): Task {
     return this.locked(() => {
@@ -590,9 +640,13 @@ export class Board {
       if (!reason.trim()) throw new BoardError('반려 사유가 필요합니다.');
       doc.task.rejections += 1;
       const exhausted = doc.task.rejections >= doc.task.max_rejections;
+      const proposal = doc.task.mission_proposal;
+      // A rejected step's achieve/stall proposal does not stand; the step decides again.
+      if (proposal) doc.task.mission_proposal = null;
       this.transition(doc, exhausted ? 'failed' : 'pending');
       this.save(doc);
       this.log(id, actor, '반려', `(${doc.task.rejections}/${doc.task.max_rejections}) ${reason}`);
+      if (proposal) this.log(id, 'system', '미션제안취소', `반려로 ${proposal.kind === 'achieve' ? '달성' : '진전 없음'} 제안이 취소됨`);
       if (exhausted) {
         this.log(id, 'system', '실패', '반려 한도 소진');
         this.settleParent(doc.task);
@@ -620,7 +674,15 @@ export class Board {
       if (item === null) return !task.questions?.length;
       return !!task.questions?.some((q) => q.id === item && q.answer === null);
     }
-    return item === null && task.parent === null && isTerminal(task.status) && !task.acknowledged && task.status !== 'canceled';
+    return item === null && this.finishedForOwner(task);
+  }
+
+  /**
+   * Whether the owner (and the responder, answering) may comment on it now: inbox items, and any
+   * task still under way, so a note on running work lands in its thread instead of vanishing.
+   */
+  canComment(task: Task, item: number | null = null): boolean {
+    return this.awaitsOwner(task, item) || (item === null && !isTerminal(task.status));
   }
 
   /** Every comment the task ever had, with markers where it was settled or reopened. */
@@ -670,7 +732,7 @@ export class Board {
       if (actor !== this.config.owner && actor !== responder) {
         throw new BoardError(`${id} 의 코멘트는 사용자와 ${responder} 만 달 수 있습니다.`);
       }
-      if (!this.awaitsOwner(doc.task, item)) throw new BoardError(`${id}${item ? ` ${item}번 질문` : ''} 은(는) 처리할 일이 아닙니다.`);
+      if (!this.canComment(doc.task, item)) throw new BoardError(`${id}${item ? ` ${item}번 질문` : ''} 은(는) 처리할 일이 아닙니다.`);
       if (!text.trim()) throw new BoardError('코멘트 내용이 비어 있습니다.');
       const entry = this.appendThread(id, { from: actor, text: text.trim(), item });
       this.save(doc); // updated_at moves, so open consoles refresh

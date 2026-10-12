@@ -339,7 +339,7 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
 <header>
   <div class="brand">BusinessFactory<small id="company"></small></div>
   <div class="engine-ctl"><span id="engine" class="pill idle">확인 중</span><button class="btn small" id="engineBtn" hidden></button></div>
-  <nav class="views"><button data-view="dash" class="on">대시보드</button><button data-view="chat">메신저</button><button data-view="staff">직원</button></nav>
+  <nav class="views"><button data-view="dash" class="on">대시보드</button><button data-view="missions">미션</button><button data-view="chat">메신저</button><button data-view="staff">직원</button></nav>
   <div class="meters" id="meters"></div>
 </header>
 
@@ -390,6 +390,25 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
       <div class="feed" id="feed"></div>
     </section>
   </div>
+ </div>
+
+ <div id="viewMissions" hidden>
+  <div class="composer">
+    <input class="field" id="mTitle" placeholder="미션 제목 (분기 규모의 방향). 예) BlindCandle 주간 활성 사용자 1000명">
+    <textarea id="mBrief" placeholder="헌장: 목적 / 성공 판정 기준 / 하지 말 것 / 참고 자료. 한 줄만 써도 첫 단계에서 ceo가 보강합니다." style="margin-top:8px"></textarea>
+    <div class="row">
+      <label>기한 <input type="date" id="mUntil"></label>
+      <label>가중치 <input id="mWeight" type="number" min="0.1" step="0.1" value="1" style="width:70px"></label>
+      <label>작업 공간 <select id="mWorkspace"><option value="">없음</option></select></label>
+      <span style="flex:1"></span>
+      <button class="btn primary" id="mCreate">미션 등록</button>
+    </div>
+    <div class="hint" style="margin-top:6px">등록하면 엔진이 단계 목표를 차례로 만들어 ceo가 스스로 진행합니다. 결재·사용자 업무는 그대로 처리할 일로 오고, 진행 보고는 ceo DM과 이 화면에 올라옵니다.</div>
+  </div>
+  <section class="panel">
+    <h2>미션 <span class="sub" id="missionSummary"></span></h2>
+    <div class="panel-body stack" id="missionList"></div>
+  </section>
  </div>
 
  <div id="viewStaff" hidden>
@@ -992,9 +1011,9 @@ async function openTask(id, from) {
     }).join('') : '<div class="empty">기록 없음</div>'}</div>
     <h4>사용자 메모 · 조치</h4>
     ${d.owner.canReopen ? `<div class="meta">끝낸 내 업무입니다. 정정하거나 더 이야기할 게 있으면 <b>완료 해제</b>를 누르세요. 다시 처리할 일로 돌아가고, 아래에 적은 코멘트에는 ${esc(d.owner.responder)} 이(가) 답합니다.</div>` : ''}
-    <textarea id="dlgNote" class="notebox" placeholder="${d.owner.inInbox || d.owner.canReopen ? `코멘트를 달면 ${esc(d.owner.responder)} 이(가) 바로 확인하고 답합니다` : '이력에 남길 메모나 취소 사유'}"></textarea>
+    <textarea id="dlgNote" class="notebox" placeholder="${d.owner.inInbox || d.owner.canReopen ? `코멘트를 달면 ${esc(d.owner.responder)} 이(가) 바로 확인하고 답합니다` : d.owner.canComment ? `메모·지시를 남기면 코멘트 탭에 쌓이고, ${esc(d.owner.responder)} 이(가) 답한 뒤 작업에 반영합니다` : '이력에 남길 메모나 취소 사유'}"></textarea>
     <div style="display:flex;gap:8px;margin-top:10px">
-      ${d.owner.canReopen ? '<button class="btn primary" id="dlgReopen">완료 해제하고 코멘트 달기</button>' : `<button class="btn" id="dlgComment">${d.owner.inInbox ? '코멘트 달기' : '메모 남기기'}</button>`}
+      ${d.owner.canReopen ? '<button class="btn primary" id="dlgReopen">완료 해제하고 코멘트 달기</button>' : `<button class="btn" id="dlgComment">${d.owner.inInbox || d.owner.canComment ? '코멘트 달기' : '메모 남기기'}</button>`}
       ${open ? '<button class="btn danger" id="dlgCancel">이 업무 취소</button>' : ''}
     </div>`;
   const body = $('#dlgBody');
@@ -1028,7 +1047,7 @@ async function openTask(id, from) {
     const p = more.previousElementSibling; p.classList.toggle('clamp');
     more.textContent = p.classList.contains('clamp') ? '더 보기' : '접기';
   });
-  if ($('#dlgComment')) $('#dlgComment').onclick = () => { const v = $('#dlgNote').value.trim(); if (!v) return toast('내용을 적어 주세요', true); act(id, 'comment', { text: v }, '코멘트를 남겼습니다').then(() => openTask(id)); };
+  if ($('#dlgComment')) $('#dlgComment').onclick = () => { const v = $('#dlgNote').value.trim(); if (!v) return toast('내용을 적어 주세요', true); act(id, 'comment', { text: v }, d.owner.canComment ? '코멘트를 남겼습니다' : '이력에 메모를 남겼습니다').then(async () => { await openTask(id); $('#dlgBody').querySelector(d.owner.canComment ? '[data-tab="cmt"]' : '[data-tab="log"]')?.click(); }); };
   if ($('#dlgReopen')) $('#dlgReopen').onclick = async () => {
     const v = $('#dlgNote').value.trim();
     try {
@@ -1105,7 +1124,7 @@ function connect() {
       connect.t = setTimeout(() => { refresh(); if (!$('#viewChat').hidden && currentConv) openConv(currentConv, true); }, 700);
     }
   });
-  es.addEventListener('changed', () => refresh());
+  es.addEventListener('changed', () => { refresh(); if (!$('#viewMissions').hidden) loadMissions(); });
   es.addEventListener('chat', () => { if (!$('#viewChat').hidden) { loadChatList(); if (currentConv) openConv(currentConv, true); } });
   es.onopen = () => ($('#feedState').textContent = '● 연결됨');
   es.onerror = () => { $('#feedState').textContent = '재연결 중…'; };
@@ -1194,11 +1213,71 @@ function showView(v) {
   $('#viewDash').hidden = v !== 'dash';
   $('#viewChat').hidden = v !== 'chat';
   $('#viewStaff').hidden = v !== 'staff';
+  $('#viewMissions').hidden = v !== 'missions';
+  if (v === 'missions') loadMissions();
   if (v === 'chat') loadChat();
   if (v === 'staff') loadStaff(staffSel ?? staffData?.staff?.[0]?.name ?? 'ceo');
   try { localStorage.setItem('bf-view', v); } catch {}
 }
 document.querySelectorAll('nav.views button').forEach((b) => (b.onclick = () => showView(b.dataset.view)));
+
+/* ---------- missions ---------- */
+const missionFolds = new Set();
+async function loadMissions() {
+  let data;
+  try { data = await api('/api/missions'); } catch (e) { return toast(e.message, true); }
+  const ws = $('#mWorkspace');
+  const wsOpts = '<option value="">없음</option>' + (state?.workspaces ?? []).map((w) => `<option>${esc(w)}</option>`).join('');
+  if (ws.dataset.html !== wsOpts) { const keep = ws.value; ws.innerHTML = wsOpts; ws.dataset.html = wsOpts; ws.value = keep; }
+  const list = data.missions;
+  const live = list.filter((m) => m.status === 'active' || m.status === 'paused').length;
+  $('#missionSummary').textContent = list.length ? `진행·일시정지 ${live} / 전체 ${list.length}` : '';
+  const pill = (m) => `<span class="pill ${m.status === 'active' ? (m.hold ? 'warn' : 'ok') : m.status === 'paused' ? 'warn' : m.status === 'achieved' ? 'ok' : 'idle'}">${esc(m.label)}${m.hold ? ` · 대기(${m.hold === 'budget' ? '예산' : '사용률'})` : ''}</span>`;
+  const chip = (t) => `<span class="chip s-${t.status}">${esc(t.label)}</span>`;
+  const html = list.length ? [...list].reverse().map((m) => `
+    <div class="card" data-mission="${m.id}">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <b>${m.id}</b> <b>${esc(m.title)}</b> ${pill(m)}
+        <span class="hint">가중치 ${m.weight} · 기한 ${esc(m.until ?? '-')} · 7일 $${m.usage7d.toFixed(2)}${m.share != null ? ` / 몫 $${m.share.toFixed(2)}` : ''}</span>
+        <span style="flex:1"></span>
+        ${m.status === 'active' ? `<button class="btn small" data-mact="pause">일시정지</button>` : ''}
+        ${m.status === 'paused' ? `<button class="btn small primary" data-mact="resume">재개</button>` : ''}
+        ${m.status === 'active' || m.status === 'paused' ? `<button class="btn small danger" data-mact="stop">중지</button>` : ''}
+      </div>
+      ${m.paused_reason && m.status !== 'active' ? `<div class="hint" style="margin-top:6px">사유: ${esc(m.paused_reason)}</div>` : ''}
+      <div style="margin-top:8px">${m.steps.length ? m.steps.map((t) => `<div class="trow" data-open="${t.id}"><span class="id">${t.id}</span><span>${esc(t.title)} <span class="who">· 하위 ${t.tasks}건${t.proposal ? ` · ${t.proposal === 'achieve' ? '달성 제안' : '진전 없음 선언'}` : ''}</span></span>${chip(t)}</div>`).join('') : '<div class="hint">아직 단계가 없습니다. 엔진이 곧 첫 단계를 만듭니다.</div>'}</div>
+      <details class="hire" data-mfold="charter:${m.id}" ${missionFolds.has('charter:' + m.id) ? 'open' : ''}><summary>헌장</summary><div class="prose">${md(m.charter)}</div></details>
+      <details class="hire" data-mfold="journal:${m.id}" ${missionFolds.has('journal:' + m.id) ? 'open' : ''}><summary>진행 기록</summary><div class="prose">${md(m.journal || '(없음)')}</div></details>
+    </div>`).join('') : '<div class="empty">미션이 없습니다.<br>위에서 분기 규모의 방향을 미션으로 등록하세요.</div>';
+  const box = $('#missionList');
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+}
+$('#missionList').addEventListener('toggle', (ev) => {
+  const d = ev.target.closest?.('[data-mfold]'); if (!d) return;
+  if (d.open) missionFolds.add(d.dataset.mfold); else missionFolds.delete(d.dataset.mfold);
+}, true);
+$('#missionList').addEventListener('click', async (ev) => {
+  const open = ev.target.closest('[data-open]'); if (open) return openTask(open.dataset.open);
+  const b = ev.target.closest('[data-mact]'); if (!b) return;
+  const id = b.closest('[data-mission]').dataset.mission, what = b.dataset.mact;
+  const body = {};
+  if (what === 'pause') { const r = prompt('일시정지 사유 (선택)'); if (r === null) return; body.reason = r; }
+  if (what === 'stop') {
+    if (!confirm(`${id} 를 중지할까요? 다시 시작할 수 없습니다.`)) return;
+    body.cancelRunning = confirm('진행 중인 단계도 지금 취소할까요?\n확인: 취소 / 취소 버튼: 끝까지 진행');
+  }
+  try { await api(`/api/mission/${id}/${what}`, body); toast(what === 'pause' ? '일시정지했습니다' : what === 'resume' ? '재개했습니다' : '중지했습니다'); loadMissions(); }
+  catch (e) { toast(e.message, true); }
+});
+$('#mCreate').onclick = async () => {
+  const title = $('#mTitle').value.trim();
+  if (!title) return toast('미션 제목을 적어 주세요', true);
+  try {
+    const r = await api('/api/mission', { title, brief: $('#mBrief').value, until: $('#mUntil').value || null, weight: Number($('#mWeight').value) || 1, workspace: $('#mWorkspace').value || null });
+    $('#mTitle').value = ''; $('#mBrief').value = ''; $('#mUntil').value = '';
+    toast(`${r.id} 등록. 엔진이 첫 단계를 만듭니다`); loadMissions();
+  } catch (e) { toast(e.message, true); }
+};
 
 /* ---------- messenger ---------- */
 let chat = { convs: [], agents: [] }, currentConv = null, convData = null;
@@ -1351,7 +1430,7 @@ $('#meetStart').onclick = async () => {
 };
 
 refresh(); connect();
-try { const v = localStorage.getItem('bf-view'); if (v === 'chat' || v === 'staff') showView(v); } catch {}
+try { const v = localStorage.getItem('bf-view'); if (v === 'chat' || v === 'staff' || v === 'missions') showView(v); } catch {}
 setInterval(refresh, 5000);
 </script>
 </body>

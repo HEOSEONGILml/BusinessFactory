@@ -23,6 +23,7 @@ import {
 } from './chat.ts';
 import type { Conversation, DueReply } from './chat.ts';
 import { dueSchedules } from './schedule.ts';
+import { charterOf, journalFile, missionExists, missionFile, MissionLoop, readMission } from './missions.ts';
 import { WINDOW_LABEL } from './stream.ts';
 import { ensureWorktree, removeWorktree, usesWorktrees } from './worktree.ts';
 import type { RunEvent, UsageSnapshot } from './stream.ts';
@@ -107,6 +108,8 @@ export class Engine {
   private readonly threadFailures = new Map<string, number>();
   /** The on/off switch. Off: no new runs start; runs in progress finish. */
   private enabled: boolean;
+  /** Mission steps: settles finished ones, creates the next, sends mission reports (docs/MISSIONS.md). */
+  private readonly missions: MissionLoop;
 
   constructor(paths: Paths, config: Config, opts: EngineOptions = {}) {
     this.paths = paths;
@@ -118,6 +121,7 @@ export class Engine {
     this.notify = opts.notify ?? buildSender(config.notify, this.log);
     this.ownerNotifier = new OwnerNotifier(paths, this.notify);
     this.enabled = opts.startEnabled ?? true;
+    this.missions = new MissionLoop({ board: this.board, paths, config, now: this.now, log: this.log, notify: this.notify });
   }
 
   get isEnabled(): boolean {
@@ -201,6 +205,11 @@ export class Engine {
     this.cleanWorktrees();
     if (!this.enabled) return;
     this.fireSchedules();
+    try {
+      this.missions.tick();
+    } catch (e) {
+      this.log(`미션 처리 오류: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (this.pausedUntil) {
       if (this.now() < this.pausedUntil) return;
       this.log('사용량 한도 대기 종료, 재개');
@@ -497,7 +506,7 @@ export class Engine {
       const entries = this.board.openThread(task.id);
       const last = entries.at(-1);
       if (!last || last.from !== this.config.owner || last.n <= (cursors[task.id] ?? 0)) continue;
-      if (!this.board.awaitsOwner(task, last.item)) continue;
+      if (!this.board.canComment(task, last.item)) continue;
       const agent = getAgent(this.paths, this.board.responder(task));
       // Claim it now so the next tick doesn't launch the same reply again.
       this.setThreadCursor(task.id, last.n);
@@ -543,7 +552,12 @@ export class Engine {
       ? `당신이 올린 결재 요청: ${task.approval.what}${task.approval.grants.length ? ` (요청 권한: ${task.approval.grants.join(', ')})` : ''}`
       : task.status === 'blocked'
         ? `당신이 사용자에게 한 질문${item ? ` (${item}/${task.questions!.length}번)` : ''}: ${item ? task.questions!.find((q) => q.id === item)!.text : '`bf task show` 이력의 마지막 질문'}`
-        : `이 목표는 ${STATUS_LABEL[task.status]} 상태로 끝났고, 사용자가 결과를 확인하는 중입니다. 결과물은 output/ 에 있습니다.`;
+        : this.board.awaitsOwner(task, item)
+          ? `이 목표는 ${STATUS_LABEL[task.status]} 상태로 끝났고, 사용자가 결과를 확인하는 중입니다. 결과물은 output/ 에 있습니다.`
+          : [
+              `이 업무는 아직 진행 중입니다 (상태: ${STATUS_LABEL[task.status]}, 담당 ${task.assignee}${this.active.has(task.id) ? ', 지금 실행 중' : ''}). 사용자가 진행 중인 업무에 메모·지시를 남긴 것입니다.`,
+              `이 코멘트는 담당자의 다음 실행 지시에 자동으로 들어가고, 지금 실행 중인 담당자도 완료 보고 전에 확인합니다. 실행 중인 작업과 겹치지 않게 이 업무 자체의 작업(파일 수정, 하위 업무 생성 등)은 하지 말고, 이해한 내용과 어떻게 반영될지를 답하세요.`,
+            ].join('\n');
     const thread = this.board
       .openThread(task.id, item)
       .map((e) => `[${e.from === owner ? '사용자' : e.from}] ${e.text}`)
@@ -869,13 +883,49 @@ export class Engine {
       .list()
       .filter((t) => t.status === 'review' && (this.reviewMisses.get(t.id) ?? 0) < this.config.max_attempts)
       .map((task) => ({ task, kind: 'review' as const }));
-    const work = this.board.runnable().map((task) => ({ task, kind: 'work' as const }));
+    const work = this.orderWork(this.board.runnable()).map((task) => ({ task, kind: 'work' as const }));
     // Reviews first: they unblock waiting parents and cost little.
     return [...reviews, ...work].filter(({ task, kind }) => {
       if (this.active.has(task.id) || this.missingAgent.has(`${kind}:${task.id}`)) return false;
       if (kind === 'work' && task.workspace && busyWorkspaces.has(task.workspace) && this.exclusiveWorkspace(task)) return false;
       return true;
     });
+  }
+
+  /**
+   * The owner's own goals before mission work; mission work by how little its mission used in
+   * 7 days (per weight), held back for paused or over-budget missions and capped at the mission slots.
+   */
+  private orderWork(runnable: Task[]): Task[] {
+    const isMission = (t: Task) => !!t.mission && missionExists(this.paths, t.mission);
+    const mission = runnable.filter(isMission);
+    if (mission.length === 0) return runnable;
+    const plain = runnable.filter((t) => !isMission(t));
+    const running = new Map<string, number>();
+    for (const a of this.active.values()) {
+      if (a.kind !== 'work') continue;
+      const m = this.board.exists(a.taskId) ? this.board.read(a.taskId).task.mission : null;
+      if (m) running.set(m, (running.get(m) ?? 0) + 1);
+    }
+    const gate = this.missions.gate(running);
+    let free = gate.slots - [...running.values()].reduce((s, n) => s + n, 0);
+    let probes = 1;
+    const ordered = mission
+      .map((t, i) => ({ t, i }))
+      .sort((a, b) => (gate.load.get(a.t.mission!) ?? 0) - (gate.load.get(b.t.mission!) ?? 0) || a.i - b.i)
+      .map(({ t }) => t);
+    const allowed: Task[] = [];
+    for (const t of ordered) {
+      if (free <= 0) break;
+      if (gate.held.has(t.mission!)) {
+        // A stale usage figure lets one run through to fetch a fresh one.
+        if (!gate.probe.has(t.mission!) || probes <= 0) continue;
+        probes--;
+      }
+      allowed.push(t);
+      free--;
+    }
+    return [...plain, ...allowed];
   }
 
   private launch(task: Task, kind: RunKind): void {
@@ -1004,6 +1054,14 @@ export class Engine {
         `- 맡긴 하위 업무가 모두 끝났습니다. 각 하위 업무의 결과물(${this.paths.board}${path.sep}<번호>${path.sep}output)과 이력을 확인해 취합하세요.`,
       );
     }
+    const notes = this.board.openThread(task.id, null).filter((e) => e.from === this.config.owner);
+    if (notes.length > 0) {
+      lines.push(
+        `- 사용자가 이 업무에 남긴 코멘트입니다. 반드시 반영하세요 (오래된 것 → 최신):`,
+        ...notes.map((e) => `  - ${e.at.slice(0, 16).replace('T', ' ')} ${truncate(e.text.replace(/\s+/g, ' '), 600)}`),
+      );
+    }
+    lines.push(`- 실행 중에도 사용자가 코멘트를 남길 수 있습니다. 완료 보고 직전에 \`bf task show ${task.id}\` 이력에서 새 [${this.config.owner}] 코멘트가 있는지 확인하고 반영하세요.`);
     if (task.attempts > 1 || task.rejections > 0) {
       lines.push('- 이 업무는 이전에 반려되었거나 보고 없이 끝난 적이 있습니다. 이력의 사유를 반드시 반영하세요.');
     }
@@ -1017,11 +1075,31 @@ export class Engine {
   private reviewPrompt(task: Task): string {
     return [
       `업무 ${task.id} (담당 ${task.assignee}) 의 결과물을 검수하세요. 당신은 검수자 ${this.config.reviewer} 입니다.`,
+      ...this.missionReviewLines(task),
       `- \`bf task show ${task.id}\` 로 완료 조건과 완료 보고를 확인하고, output/ 의 결과물을 직접 열어 확인하세요.`,
       `- 완료 조건을 모두 충족하면 \`bf task pass ${task.id} --note "<확인한 내용>"\``,
       `- 하나라도 미달이면 \`bf task reject ${task.id} "<무엇이 왜 부족하고 어떻게 고쳐야 하는지>"\``,
+      `- 이력에 사용자([${this.config.owner}])의 코멘트가 있으면 그 요청도 완료 조건처럼 반영됐는지 보세요.`,
       `- 결과물을 직접 고치지 마세요. 판정만 합니다.`,
     ].join('\n');
+  }
+
+  /** A mission step is judged against its charter too; a proposal to end the mission takes effect only if it passes. */
+  private missionReviewLines(task: Task): string[] {
+    if (!task.mission || task.parent !== null || !missionExists(this.paths, task.mission)) return [];
+    const doc = readMission(this.paths, task.mission);
+    const lines = [
+      `[미션 단계] 이 업무는 미션 ${task.mission} "${doc.mission.title}" 의 단계입니다. 헌장: ${missionFile(this.paths, task.mission)}, 진행 기록: ${journalFile(this.paths, task.mission)}`,
+      `- 완료 조건과 함께, 이 단계가 헌장의 성공 판정 기준에 기여했는지 보세요. 하위 업무 3개 이상·외부 공개·결재·방향 전환이 있었는데 계획 검토(--plan-review 하위 업무)가 없었다면 반려하세요.`,
+    ];
+    const p = task.mission_proposal;
+    if (p?.kind === 'achieve') {
+      lines.push(`- 이 단계는 미션 달성을 제안했습니다: "${p.text}". 헌장의 성공 판정 기준을 하나씩 대조해 모두 충족했을 때만 통과시키세요. 통과하면 미션이 달성으로 끝납니다.`);
+      lines.push(`- 헌장 요약: ${charterOf(doc.body).slice(0, 1500)}`);
+    } else if (p?.kind === 'stall') {
+      lines.push(`- 이 단계는 진전 없음을 선언했습니다: "${p.text}". 통과하면 미션이 일시정지되고 사용자에게 보고됩니다. 근거가 약하면 반려하세요.`);
+    }
+    return lines;
   }
 
   // ---- results ----

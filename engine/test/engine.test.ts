@@ -404,7 +404,9 @@ describe('처리할 일 코멘트', () => {
     assert.equal(board.read(id).task.status, 'pending');
     assert.deepEqual(board.openThread(id), []);
     assert.match(board.readLog(id), /답변: 코멘트로 나눈 내용:[\s\S]*\*\*사용자\*\*: 후보를 보여 주세요[\s\S]*\*\*ceo\*\*: a\.com, b\.com/);
-    assert.throws(() => board.threadPost('owner', id, '늦은 코멘트'), /처리할 일이 아닙니다/);
+    // 다시 진행 중인 업무라 늦은 코멘트도 버려지지 않고 새 스레드로 쌓인다 (다음 실행이 읽는다)
+    board.threadPost('owner', id, '늦은 코멘트');
+    assert.deepEqual(board.openThread(id).map((e) => e.text), ['늦은 코멘트']);
   });
 
   it('질문이 여러 건이면 건마다 따로 이야기하고 따로 확정한다', async () => {
@@ -430,9 +432,29 @@ describe('처리할 일 코멘트', () => {
     board.approve('owner', a.id, '', () => {});
     assert.deepEqual(board.openThread(a.id), []);
 
-    const t = goal(board, '진행 중 목표');
-    assert.throws(() => board.threadPost('owner', t.id, '어때요?'), /처리할 일이 아닙니다/);
     assert.throws(() => board.threadPost('worker', a.id, '끼어들기'), /사용자와 ceo 만/);
+    const c = goal(board, '취소된 목표');
+    board.cancel('owner', c.id);
+    assert.throws(() => board.threadPost('owner', c.id, '어때요?'), /처리할 일이 아닙니다/);
+  });
+
+  it('진행 중인 업무에 남긴 메모도 코멘트로 쌓이고, 담당자가 답하며, 작업 지시에 들어간다', async () => {
+    const { engine, board, calls } = setup({ ceo: 'done', reviewer: 'pass' });
+    const t = goal(board, '진행 중 목표');
+    board.start(t.id);
+    board.threadPost('owner', t.id, '주식은 버리고 코인으로 가자');
+    assert.deepEqual(board.openThread(t.id).map((e) => [e.from, e.text]), [['owner', '주식은 버리고 코인으로 가자']]);
+    assert.match(board.readLog(t.id), /\[owner\] 코멘트: 주식은 버리고 코인으로 가자/);
+
+    engine.recover(); // 진행 중으로 남은 업무를 대기로 되돌려 엔진이 다시 실행하게
+    await engine.runUntilIdle();
+    const reply = calls().find((c) => c.prompt.startsWith('[코멘트]'))!;
+    assert.ok(reply, '진행 중 업무의 메모에도 담당자가 답한다');
+    assert.equal(reply.agent, 'ceo');
+    assert.match(reply.prompt, /아직 진행 중/);
+    assert.ok(board.thread(t.id).some((e) => e.from === 'ceo'), '답이 코멘트 탭에 남는다');
+    const work = calls().find((c) => c.task === t.id && c.prompt.startsWith(`업무 ${t.id} 를 수행`))!;
+    assert.match(work.prompt, /사용자가 이 업무에 남긴 코멘트[\s\S]*주식은 버리고 코인으로 가자/);
   });
 });
 
