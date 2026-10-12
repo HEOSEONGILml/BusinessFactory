@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAgent, listAgents } from './agents.ts';
 import type { AgentInfo } from './agents.ts';
-import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, lastLogEntry, originThreadTask, STATUS_LABEL } from './board.ts';
+import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isMissionStep, isTerminal, lastLogEntry, originThreadTask, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { writeFileAtomic } from './fsutil.ts';
@@ -376,7 +376,7 @@ export class Engine {
       }
       if (t.announced || !isTerminal(t.status) || t.updated_at < since) continue;
       try {
-        const step = t.parent === null && !!t.mission;
+        const step = isMissionStep(t);
         const conv = step ? null : channelForTask(this.paths, t);
         // Already answered in this very conversation by reportOrigins.
         if (conv && t.origin?.conv !== conv.id) {
@@ -1184,7 +1184,7 @@ export class Engine {
 
   /** A mission step is judged against its charter too; a proposal to end the mission takes effect only if it passes. */
   private missionReviewLines(task: Task): string[] {
-    if (!task.mission || task.parent !== null || !missionExists(this.paths, task.mission)) return [];
+    if (!task.mission || !isMissionStep(task) || !missionExists(this.paths, task.mission)) return [];
     const doc = readMission(this.paths, task.mission);
     const lines = [
       `[미션 단계] 이 업무는 미션 ${task.mission} "${doc.mission.title}" 의 단계입니다. 헌장: ${missionFile(this.paths, task.mission)}, 진행 기록: ${journalFile(this.paths, task.mission)}`,

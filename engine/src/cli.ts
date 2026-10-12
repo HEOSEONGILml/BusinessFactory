@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { listAgents } from './agents.ts';
-import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, normalizeId, STATUS_LABEL, STATUSES } from './board.ts';
+import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isMissionStep, isTerminal, normalizeId, STATUS_LABEL, STATUSES } from './board.ts';
 import type { Status, Task } from './board.ts';
 import { initCompany } from './company.ts';
 import { loadConfig } from './config.ts';
@@ -15,6 +15,7 @@ import {
   createMission,
   descendantsOf,
   journalFile,
+  missionExists,
   listMissions,
   MISSION_STATUS_LABEL,
   missionFile,
@@ -71,6 +72,7 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf mission charter <M001> --file <파일> | --text "<헌장>"         헌장 보강 (단계 담당자·사용자)
   bf mission achieve <M001> --summary "<근거>"                    달성 제안 (단계 담당자, 검수 통과 시 확정)
   bf mission stall <M001> --reason "<이유>"                       진전 없음 선언 (단계 담당자)
+  bf mission attach <M001> <업무>                                 대화에서 등록된 업무와 그 하위를 미션 소속으로 (사용자)
 
 업무
   bf task create --to <직원> --title "<제목>" --done-when "<조건>" [--done-when ...]
@@ -365,6 +367,12 @@ const MAX_TASKS_PER_REQUEST = 5;
  * on any inbox item (even a finished goal) — register it. It becomes a top-level task tied to the
  * owner's request, and its result is posted back where it was asked.
  */
+/** The mission whose channel this is (#m001 → M001), when that mission exists. */
+function missionOfChannel(paths: Paths, conv: { id: string; kind: string }): string | null {
+  const m = conv.kind === 'channel' ? /^c-(m\d+)$/.exec(conv.id) : null;
+  return m && missionExists(paths, m[1].toUpperCase()) ? m[1].toUpperCase() : null;
+}
+
 function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: string[]): number {
   const { board, actor, io } = ctx;
   const { values } = parseArgs({
@@ -385,7 +393,7 @@ function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: s
   if (actor === owner) throw new BoardError('사용자는 bf goal 로 목표를 등록하세요.');
   let origin: { conv: string; message: string };
   let where: string;
-  let defaults: { project: string | null; workspace: string | null };
+  let defaults: { project: string | null; workspace: string | null; mission: string | null };
   if (env.BF_CHAT) {
     const conv = getConv(board.paths, env.BF_CHAT);
     const request = lastOwnerMessage(board.paths, conv.id, owner);
@@ -393,14 +401,14 @@ function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: s
     origin = { conv: conv.id, message: request.id };
     const label = conv.kind === 'dm' ? 'DM' : conv.kind === 'meeting' ? `회의 "${conv.title}"` : `채널 ${conv.title}`;
     where = `${label} 에서 사용자 요청 (대화 맥락: \`bf chat read ${conv.id}\`)`;
-    defaults = { project: conv.project ?? null, workspace: null };
+    defaults = { project: conv.project ?? null, workspace: null, mission: missionOfChannel(board.paths, conv) };
   } else if (env.BF_THREAD) {
     const source = board.read(env.BF_THREAD).task;
     const request = board.thread(source.id).filter((e) => !e.event && e.from === owner).at(-1);
     if (!request) throw new BoardError('사용자가 이 코멘트에서 부탁한 일이 없습니다. 업무는 사용자의 요청이 있을 때만 등록합니다.');
     origin = { conv: `task:${source.id}`, message: String(request.n) };
     where = `업무 ${source.id} "${source.title}" 의 코멘트에서 사용자 요청 (맥락: \`bf task show ${source.id}\`, 결과물: ${source.id} 의 output/)`;
-    defaults = { project: source.project ?? null, workspace: source.workspace ?? null };
+    defaults = { project: source.project ?? null, workspace: source.workspace ?? null, mission: source.mission ?? null };
   } else {
     throw new BoardError('bf chat task 는 메신저·회의·코멘트에서 답할 때만 씁니다. 업무 중에는 bf task create 를 쓰세요.');
   }
@@ -422,6 +430,8 @@ function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: s
     priority: values.priority === undefined ? undefined : parsePriority(values.priority),
     parent: null,
     origin,
+    // Asked for in a mission channel or on a mission task: the work belongs to that mission (its slots, usage).
+    mission: defaults.mission ?? undefined,
   });
   io.out(`업무 등록: ${task.id} → ${task.assignee} (끝나면 결과가 ${env.BF_CHAT ? '이 대화' : '이 코멘트'}에 올라옵니다)`);
   return 0;
@@ -573,6 +583,15 @@ function runMission(sub: string | undefined, args: string[], ctx: TaskCtx): numb
       io.out(`${m.id} 설정 변경: 가중치 ${m.weight}, 기한 ${m.until ?? '-'}`);
       return 0;
     }
+    case 'attach': {
+      ownerOnly();
+      const id = normalizeMissionId(args[0]);
+      if (!missionExists(paths, id)) throw new BoardError(`없는 미션입니다: ${id}`);
+      if (!args[1]) throw new BoardError('사용법: bf mission attach <M001> <업무>');
+      const changed = board.attachMission(actor, normalizeId(args[1]), id);
+      io.out(changed.length ? `${id} 소속으로 지정: ${changed.map((t) => t.id).join(', ')}` : `바뀐 업무가 없습니다 (이미 ${id} 소속).`);
+      return 0;
+    }
     case 'charter': {
       const { values, positionals } = parse({ file: { type: 'string' }, text: { type: 'string' } });
       const id = normalizeMissionId(positionals[0]);
@@ -591,7 +610,7 @@ function runMission(sub: string | undefined, args: string[], ctx: TaskCtx): numb
       return 0;
     }
     default:
-      throw new BoardError('사용법: bf mission create|list|show|pause|resume|stop|set|charter|achieve|stall (bf help 참고)');
+      throw new BoardError('사용법: bf mission create|list|show|pause|resume|stop|set|attach|charter|achieve|stall (bf help 참고)');
   }
 }
 
@@ -678,7 +697,7 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
       );
       if (task.depends_on.length) io.out(`선행: ${task.depends_on.join(', ')}`);
       if (task.project || task.workspace) io.out(`프로젝트: ${task.project ?? '-'}  작업공간: ${task.workspace ?? '-'}`);
-      if (task.mission) io.out(`미션: ${task.mission}${task.parent === null ? ' (단계)' : ''}`);
+      if (task.mission) io.out(`미션: ${task.mission}${isMissionStep(task) ? ' (단계)' : ''}`);
       if (task.mission_proposal) io.out(`미션 ${task.mission_proposal.kind === 'achieve' ? '달성 제안' : '진전 없음 선언'}: ${task.mission_proposal.text}`);
       if (task.ask_to) io.out(`질문 대상: ${task.ask_to}`);
       const kids = board.children(id);
@@ -798,7 +817,7 @@ function printInbox(board: Board, io: Io): void {
   const approvals = tasks.filter((t) => t.status === 'blocked' && t.approval);
   const questions = tasks.filter((t) => t.status === 'blocked' && !t.approval && t.ask_to === owner);
   const mine = tasks.filter((t) => board.isOwnerTask(t) && t.status === 'pending');
-  const finished = tasks.filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && !(t.mission && t.status === 'done'));
+  const finished = tasks.filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && !(isMissionStep(t) && t.status === 'done'));
   if (!approvals.length && !mine.length && !questions.length && !finished.length) {
     io.out('처리할 일이 없습니다.');
     return;

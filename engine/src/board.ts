@@ -45,6 +45,15 @@ const TRANSITIONS: Record<Status, readonly Status[]> = {
   canceled: [],
 };
 
+/**
+ * A mission step: a top-level goal the engine created for its mission. Top-level mission work the
+ * owner asked for in a mission channel or a mission task's comments (it has an `origin`) belongs to
+ * the mission (slots, usage) but is not a step: it does not count as one or hold back the next.
+ */
+export function isMissionStep(task: Pick<Task, 'mission' | 'parent' | 'origin'>): boolean {
+  return !!task.mission && task.parent === null && !task.origin;
+}
+
 export function isTerminal(status: Status): boolean {
   return TERMINAL.has(status);
 }
@@ -84,7 +93,10 @@ export interface Task {
   announced?: boolean;
   /** The task's own git worktree on its workspace (config worktrees). */
   worktree?: TaskWorktree | null;
-  /** Mission this task works for (steps get it from the engine, subtasks inherit it). Absent on older tasks. */
+  /**
+   * Mission this task works for (steps get it from the engine, subtasks inherit it, requests made in
+   * a mission channel or a mission task's comments get that mission). Absent on older tasks.
+   */
   mission?: string | null;
   /**
    * A mission step's proposal that the mission is achieved or stalled. It takes effect only
@@ -421,7 +433,7 @@ export class Board {
       this.requireStatus(doc.task, 'running');
       const list = items.map((s) => s.trim()).filter(Boolean);
       if (!question.trim() && list.length === 0) throw new BoardError('질문 내용이 비어 있습니다.');
-      if (doc.task.mission && doc.task.parent === null && !toOwner && actor !== this.config.owner) {
+      if (isMissionStep(doc.task) && !toOwner && actor !== this.config.owner) {
         // A step was handed out by the engine: an ordinary question would land on the owner and stall the mission.
         throw new BoardError(
           '미션 단계에는 맡긴 사람이 없습니다. 판단이 필요하면 합리적으로 가정하고 진행한 뒤 보고에 적으세요. ' +
@@ -589,13 +601,41 @@ export class Board {
     });
   }
 
+  /**
+   * Put a task and everything under it into a mission (`bf mission attach`), for work registered
+   * before requests in mission channels inherited their mission. Tasks already in another mission
+   * are refused; ones already in this mission are left as they are. Returns the tasks changed.
+   */
+  attachMission(actor: string, id: string, mission: string): Task[] {
+    return this.locked(() => {
+      const all = this.list();
+      const root = this.read(id).task;
+      const tree = [root];
+      for (let i = 0; i < tree.length; i++) tree.push(...all.filter((t) => t.parent === tree[i].id));
+      const other = tree.filter((t) => t.mission && t.mission !== mission);
+      if (other.length > 0) throw new BoardError(`이미 다른 미션 소속인 업무가 있습니다: ${other.map((t) => `${t.id}(${t.mission})`).join(', ')}`);
+      if (isMissionStep({ mission, parent: root.parent, origin: root.origin })) {
+        throw new BoardError(`${id} 는 대화·코멘트에서 등록된 업무가 아니어서 미션 단계로 잡힙니다. 단계는 엔진이 만듭니다.`);
+      }
+      const changed: Task[] = [];
+      for (const t of tree.filter((t) => !t.mission)) {
+        const doc = this.read(t.id);
+        doc.task.mission = mission;
+        this.save(doc);
+        this.log(t.id, actor, '미션소속', `${mission} 소속으로 지정${t.id === id ? '' : ` (상위 ${id} 와 함께)`}`);
+        changed.push(doc.task);
+      }
+      return changed;
+    });
+  }
+
   /** A mission step proposes that its mission is achieved or stalled (effective once the step passes review). */
   proposeMission(actor: string, id: string, kind: MissionProposal['kind'], text: string): Task {
     return this.locked(() => {
       const doc = this.read(id);
       this.requireAssignee(actor, doc.task);
       this.requireStatus(doc.task, 'running');
-      if (!doc.task.mission || doc.task.parent !== null) throw new BoardError(`${id} 는 미션 단계가 아닙니다.`);
+      if (!isMissionStep(doc.task)) throw new BoardError(`${id} 는 미션 단계가 아닙니다.`);
       if (!text.trim()) throw new BoardError('근거가 필요합니다.');
       doc.task.mission_proposal = { kind, text: text.trim(), at: this.timestamp() };
       this.save(doc);
@@ -610,7 +650,7 @@ export class Board {
    */
   finishedForOwner(task: Task): boolean {
     return (
-      task.parent === null && isTerminal(task.status) && !task.acknowledged && task.status !== 'canceled' && !(task.mission && task.status === 'done')
+      task.parent === null && isTerminal(task.status) && !task.acknowledged && task.status !== 'canceled' && !(isMissionStep(task) && task.status === 'done')
     );
   }
 

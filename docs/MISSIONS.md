@@ -42,6 +42,7 @@ company/missions/M001/
 - `mission.md` 쓰기는 `company/.mission-lock` 잠금 안에서 한다(CLI와 엔진이 함께 쓴다).
 - 업무 메타에 선택 필드 두 개를 더한다. 옛 업무 파일에는 없고, 없으면 미션과 무관한 업무로 읽힌다.
   - `mission`: 단계는 엔진이 넣고, 하위 업무는 **생성 시 부모에게서 상속해 저장**한다(`project`·`workspace`와 같은 방식, 검토 권장 4).
+    미션 채널(`#m001`)이나 미션 업무의 코멘트에서 `bf chat task`로 등록한 업무도 그 미션을 받는다. 이런 업무는 최상위라도 `origin`이 있어 **단계가 아니다**(단계 수·다음 단계 생성·단계 질문 규칙에 들지 않고, 자리 상한·사용량만 미션 몫). 단계 판정은 `isMissionStep`(mission 있음·parent 없음·origin 없음). 이 규칙 전에 소속 없이 등록된 업무는 `bf mission attach M001 <업무>`(owner, 자율 운영이면 ceo)로 하위까지 옮긴다.
   - `mission_proposal`: 단계가 낸 달성/진전 없음 제안 `{kind, text, at}` (5장).
 
 ## 3. 루프
@@ -134,6 +135,7 @@ company/missions/M001/
 | `bf mission pause M001 [--reason ...]` / `resume M001` | owner | 일시정지·재개 |
 | `bf mission stop M001 [--cancel-running] [--reason ...]` | owner | 중지 |
 | `bf mission set M001 [--weight W] [--until 날짜\|""] [--title ...]` | owner | 조정 (journal에 기록) |
+| `bf mission attach M001 <업무>` | owner | 대화에서 등록된 업무와 그 하위를 미션 소속으로 (각 업무 이력에 기록) |
 | `bf mission charter M001 --file f \| --text "..."` | owner, 그 미션 단계 담당자 | 헌장 보강 (원문 보존) |
 | `bf mission achieve M001 --summary "..."` / `bf mission stall M001 --reason "..."` | 단계 담당자 (owner는 즉시 확정) | 달성 제안 / 진전 없음 선언 |
 | `bf task create --plan-review [--desc "<볼 점>"] [--title ...]` | 업무 수행 중인 누구나 | 지금 업무의 `output/plan.md` 비판 검토를 reviewer에게 (검수 없음) |

@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { BoardError } from '../src/board.ts';
-import { readMessages } from '../src/chat.ts';
+import { ensureChannel, ensureMissionChannel, postMessage, readMessages } from '../src/chat.ts';
 import { main } from '../src/cli.ts';
 import { DEFAULT_CONFIG, DEFAULT_MISSIONS, loadConfig } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
@@ -450,6 +450,97 @@ describe('미션 단계 규칙', () => {
     assert.equal(nextJudgement('한 일\n다음: 가격 실험'), '가격 실험');
     assert.equal(nextJudgement('**다음**: 굵게'), '굵게');
     assert.equal(nextJudgement('없음'), '');
+  });
+});
+
+describe('대화에서 등록한 업무의 미션 소속', () => {
+  it('미션 채널(#m001)에서 bf chat task 로 만든 업무와 그 하위 업무는 미션 소속이지만 단계는 아니다', () => {
+    const { board, paths, bf } = setup({});
+    createMission(paths, 'owner', { title: 'm', brief: 'b' }, new Date());
+    const mc = ensureMissionChannel(paths, 'M001');
+    postMessage(paths, mc.id, 'owner', '콘텐츠 3건 더 만들어 줘', { chain: 0 });
+    const r = bf(['chat', 'task', '--to', 'worker', '--title', '콘텐츠', '--done-when', 'output/a.md'], { BF_ACTOR: 'ceo', BF_CHAT: mc.id });
+    assert.equal(r.code, 0, r.err);
+    const t = board.list().find((x) => x.title === '콘텐츠')!;
+    assert.equal(t.mission, 'M001');
+    assert.equal(t.parent, null);
+    // Not a step: the mission's step count and the next step are unaffected.
+    assert.deepEqual(missionSteps(board.list(), 'M001'), []);
+    assert.match(bf(['task', 'show', t.id]).out, /미션: M001$/m);
+    // Subtasks inherit it; the chat task asks whoever registered it, as before.
+    board.start(t.id);
+    const kid = board.createTask('worker', { title: '하위', assignee: 'worker', doneWhen: DONE_WHEN, parent: t.id });
+    assert.equal(kid.mission, 'M001');
+    assert.equal(board.ask('worker', t.id, '몇 건?').ask_to, 'ceo');
+  });
+
+  it('미션 업무의 코멘트에서 등록한 업무도 그 미션을 물려받고, 미션과 무관한 채널은 그대로다', () => {
+    const { board, paths, bf } = setup({});
+    createMission(paths, 'owner', { title: 'm', brief: 'b' }, new Date());
+    const step = board.createTask('owner', { title: '[M001] 단계 1', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null, mission: 'M001' });
+    // A user task under the step: the owner comments on it in the inbox.
+    const sub = board.createTask('ceo', { title: '계정 가입', assignee: 'owner', doneWhen: DONE_WHEN, parent: step.id });
+    board.threadPost('owner', sub.id, '이것도 같이 해 줘');
+    const rt = bf(['chat', 'task', '--to', 'worker', '--title', '추가 일', '--done-when', 'x'], { BF_ACTOR: 'ceo', BF_THREAD: sub.id });
+    assert.equal(rt.code, 0, rt.err);
+    const fromThread = board.list().find((x) => x.title === '추가 일')!;
+    assert.equal(fromThread.mission, 'M001');
+
+    const general = ensureChannel(paths, 'general');
+    postMessage(paths, general.id, 'owner', '이건 따로 해 줘', { chain: 0 });
+    assert.equal(bf(['chat', 'task', '--title', '따로', '--done-when', 'x'], { BF_ACTOR: 'ceo', BF_CHAT: general.id }).code, 0);
+    assert.equal(board.list().find((x) => x.title === '따로')!.mission, undefined);
+    // Only the engine's step counts as a step.
+    assert.deepEqual(missionSteps(board.list(), 'M001').map((x) => x.id), [step.id]);
+  });
+
+  it('미션 채널에서 등록한 업무도 미션 자리 상한을 지킨다', () => {
+    const started: string[] = [];
+    const { paths } = setup({});
+    const config: Config = { ...DEFAULT_CONFIG, max_concurrency: 2, missions: { ...DEFAULT_MISSIONS } };
+    const engine = new Engine(paths, config, {
+      log: () => {},
+      notify: () => {},
+      run: (spec) => {
+        started.push(spec.env.BF_TASK);
+        return new Promise(() => {});
+      },
+    });
+    const board = engine.board;
+    createMission(paths, 'owner', { title: 'm', brief: 'b' }, new Date());
+    const origin = { conv: 'c-m001', message: '1' };
+    const a = board.createTask('ceo', { title: '대화 업무 A', assignee: 'worker', doneWhen: DONE_WHEN, parent: null, mission: 'M001', origin });
+    const b = board.createTask('ceo', { title: '대화 업무 B', assignee: 'worker', doneWhen: DONE_WHEN, parent: null, mission: 'M001', origin });
+    const g = board.createTask('owner', { title: '사용자 목표', assignee: 'worker', doneWhen: DONE_WHEN, parent: null });
+    engine.tick();
+    // Two slots: the owner's goal, then one mission task (max_slots = 1). The other chat task waits.
+    assert.equal(started.length, 2);
+    assert.equal(started[0], g.id);
+    assert.ok(!(started.includes(a.id) && started.includes(b.id)), `대화 업무 두 건이 모두 시작됨: ${started}`);
+  });
+
+  it('bf mission attach: 소속 없이 등록된 대화 업무와 그 하위를 미션으로 옮긴다 (사용자 또는 자율 운영 ceo)', () => {
+    const { board, paths, bf } = setup({});
+    createMission(paths, 'owner', { title: 'm', brief: 'b' }, new Date());
+    // Registered before the fix: no mission on the chat task or its subtasks.
+    const t = board.createTask('ceo', { title: '옛 대화 업무', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null, origin: { conv: 'c-m001', message: '1' } });
+    const k1 = board.createTask('ceo', { title: '하위1', assignee: 'worker', doneWhen: DONE_WHEN, parent: t.id });
+    const k2 = board.createTask('worker', { title: '하위2', assignee: 'worker', doneWhen: DONE_WHEN, parent: k1.id });
+    assert.equal(board.read(k2.id).task.mission, undefined);
+
+    assert.notEqual(bf(['mission', 'attach', 'M001', t.id], { BF_ACTOR: 'worker' }).code, 0);
+    const r = bf(['mission', 'attach', 'M001', t.id]);
+    assert.equal(r.code, 0, r.err);
+    for (const id of [t.id, k1.id, k2.id]) assert.equal(board.read(id).task.mission, 'M001');
+    assert.match(board.readLog(k2.id), /미션소속/);
+    assert.deepEqual(missionSteps(board.list(), 'M001'), []);
+    assert.match(bf(['mission', 'attach', 'M001', t.id]).out, /바뀐 업무가 없습니다/);
+
+    // An owner goal would turn into a step: refused. Unknown missions too.
+    const goal = board.createTask('owner', { title: '목표', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null });
+    assert.notEqual(bf(['mission', 'attach', 'M001', goal.id]).code, 0);
+    assert.equal(board.read(goal.id).task.mission, undefined);
+    assert.notEqual(bf(['mission', 'attach', 'M009', t.id]).code, 0);
   });
 });
 

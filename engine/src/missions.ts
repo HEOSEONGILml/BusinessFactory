@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { Board, BoardError, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
+import { Board, BoardError, isMissionStep, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import { dmId, ensureDm, ensureMissionChannel, postMessage, projectOf, withDecisions } from './chat.ts';
 import type { Config } from './config.ts';
@@ -270,7 +270,7 @@ export function deadlinePassed(m: Mission, now: Date): boolean {
 
 /** The mission's steps (its top-level goals), oldest first. */
 export function missionSteps(tasks: Task[], id: string): Task[] {
-  return tasks.filter((t) => t.mission === id && t.parent === null).sort((a, b) => a.id.localeCompare(b.id));
+  return tasks.filter((t) => t.mission === id && isMissionStep(t)).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function descendantsOf(tasks: Task[], id: string): Task[] {
@@ -463,7 +463,7 @@ export function proposeOrDecide(board: Board, id: string, actor: string, current
   }
   if (!currentTask) throw new BoardError('미션 단계를 수행 중일 때만 쓸 수 있습니다.');
   const step = board.read(currentTask).task;
-  if (step.mission !== id || step.parent !== null) throw new BoardError(`${currentTask} 는 미션 ${id} 의 단계가 아닙니다.`);
+  if (step.mission !== id || !isMissionStep(step)) throw new BoardError(`${currentTask} 는 미션 ${id} 의 단계가 아닙니다.`);
   board.proposeMission(actor, step.id, kind, text);
   return kind === 'achieve'
     ? `${step.id}: 달성 제안을 기록했습니다. 보고서를 쓰고 완료 보고하세요. 검수를 통과하면 미션이 달성으로 확정됩니다.`
@@ -474,7 +474,7 @@ export function proposeOrDecide(board: Board, id: string, actor: string, current
 export function checkCharterActor(board: Board, id: string, actor: string, currentTask: string | null): void {
   if (actor === board.config.owner) return;
   const step = currentTask ? board.read(currentTask).task : null;
-  if (!step || step.mission !== id || step.parent !== null || step.assignee !== actor) {
+  if (!step || step.mission !== id || !isMissionStep(step) || step.assignee !== actor) {
     throw new BoardError('헌장은 사용자 또는 그 미션의 단계를 수행 중인 담당자만 고칠 수 있습니다.');
   }
 }
