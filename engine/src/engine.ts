@@ -794,6 +794,12 @@ export class Engine {
         `- 사용자 업무 ${ownerOpen.map((k) => k.id).join(', ')} 는 사용자가 처리 중입니다. 기다리지 말고 그것 없이 할 수 있는 일을 진행하세요. 그 결과가 꼭 필요한 업무는 --depends <번호> 로 걸어 두면 끝난 뒤 시작됩니다.`,
       );
     }
+    const ended = kids.filter((k) => isTerminal(k.status));
+    if (ended.length > 0 && ended.length < kids.length) {
+      lines.push(
+        `- 끝난 하위 업무 ${ended.map((k) => k.id).join(', ')} 의 결과물과 이력을 확인하세요. 완료 보고에 '못함'·실패가 있으면 그대로 두지 말고, 해결 업무를 만들거나 사용자에게 알리고(사용자 업무 또는 질문), 그 결과를 전제로 한 업무는 고치거나 취소하세요. 문제가 없으면 보고 없이 끝내면 됩니다.`,
+      );
+    }
     if (kids.length > 0 && kids.every((k) => isTerminal(k.status))) {
       lines.push(
         `- 맡긴 하위 업무가 모두 끝났습니다. 각 하위 업무의 결과물(${this.paths.board}${path.sep}<번호>${path.sep}output)과 이력을 확인해 취합하세요.`,

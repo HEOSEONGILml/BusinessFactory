@@ -108,6 +108,20 @@ describe('업무 흐름', () => {
     assert.match(board.readLog(g.id), /\[system\] 재개/);
   });
 
+  it('뒤따르는 업무가 걸린 하위 업무가 끝나면, 나머지가 남아도 상위가 깨어나 결과를 확인한다', () => {
+    const { board } = makeBoard();
+    const g = goal(board);
+    board.start(g.id);
+    const c1 = sub(board, g.id, 'ceo', 'worker', { review: false });
+    sub(board, g.id, 'ceo', 'owner', { dependsOn: [c1.id] });
+    assert.equal(board.finishRun(g.id, 'run ended').status, 'waiting');
+
+    board.start(c1.id);
+    board.done('worker', c1.id, '배포는 못함');
+    assert.equal(board.read(g.id).task.status, 'pending', '사용자 업무가 시작되기 전에 상위가 확인');
+    assert.match(board.readLog(g.id), /진행 전 결과 확인 차례/);
+  });
+
   it('하위 업무가 진행 중이면 완료 보고를 거부한다', () => {
     const { board } = makeBoard();
     const g = goal(board);

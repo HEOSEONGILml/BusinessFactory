@@ -750,11 +750,22 @@ export class Board {
     if (!task.parent) return;
     const parentDoc = this.read(task.parent);
     if (parentDoc.task.status !== 'waiting') return;
-    if (this.children(task.parent).some((c) => !isTerminal(c.status))) return;
+    const open = this.children(task.parent).filter((c) => !isTerminal(c.status));
+    // Siblings that build on this result: the manager checks it before they go ahead
+    // (e.g. an owner task that assumes a deploy which actually failed).
+    const dependents = open.filter((c) => c.depends_on.includes(task.id));
+    if (open.length > 0 && dependents.length === 0) return;
     parentDoc.task.attempts = 0; // progress: count failed runs afresh
     this.transition(parentDoc, 'pending');
     this.save(parentDoc);
-    this.log(task.parent, 'system', '재개', '하위 업무가 모두 종료되어 결과 취합 차례');
+    this.log(
+      task.parent,
+      'system',
+      '재개',
+      open.length === 0
+        ? '하위 업무가 모두 종료되어 결과 취합 차례'
+        : `하위 업무 ${task.id} 종료, 이를 전제로 한 ${dependents.map((c) => c.id).join(', ')} 진행 전 결과 확인 차례`,
+    );
   }
 
   private blockOnOwner(doc: TaskDoc, actor: string, approval: Approval): Task {
