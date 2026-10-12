@@ -80,8 +80,20 @@ export interface Task {
   acknowledged?: boolean;
   /** Asked for in the messenger: the result goes back to that conversation. */
   origin?: TaskOrigin | null;
+  /** The task's own git worktree on its workspace (config worktrees). */
+  worktree?: TaskWorktree | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface TaskWorktree {
+  path: string;
+  /** bf/<id> */
+  branch: string;
+  /** The workspace branch it forked from and is merged back into. */
+  base: string;
+  /** Engine removed the worktree after the task ended. */
+  removed?: boolean;
 }
 
 export interface TaskOrigin {
@@ -523,6 +535,16 @@ export class Board {
       if (!doc.task.origin) return doc.task;
       doc.task.origin.reported = true;
       if (doc.task.status === 'done' && doc.task.parent === null) doc.task.acknowledged = true;
+      this.save(doc);
+      return doc.task;
+    });
+  }
+
+  /** Engine: record the task's worktree (or that it was removed). */
+  setWorktree(id: string, worktree: TaskWorktree): Task {
+    return this.locked(() => {
+      const doc = this.read(id);
+      doc.task.worktree = worktree;
       this.save(doc);
       return doc.task;
     });

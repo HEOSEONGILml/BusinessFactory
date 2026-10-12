@@ -12,6 +12,7 @@ import { addMemory, listMemory, readMemory } from './memory.ts';
 import { getConv, lastOwnerMessage, listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
+import { integrateWorktree } from './worktree.ts';
 import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
 import { startWeb, statusLabel } from './web.ts';
 import { clearPassword, setPassword } from './webauth.ts';
@@ -470,7 +471,12 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
         allowPositionals: true,
         options: { summary: { type: 'string' } },
       });
-      const task = board.done(actor, requireId(positionals), values.summary ?? '');
+      const id = requireId(positionals);
+      const before = board.read(id).task;
+      // Fold the work into the workspace first: a conflict must stop the report, not follow it.
+      const merged = before.worktree && !before.worktree.removed && actor === before.assignee ? integrateWorktree(board.paths, before) : null;
+      const task = board.done(actor, id, values.summary ?? '');
+      if (merged) io.out(merged);
       io.out(`${task.id} → ${STATUS_LABEL[task.status]}`);
       return 0;
     }

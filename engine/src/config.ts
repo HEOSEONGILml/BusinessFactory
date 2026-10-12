@@ -57,6 +57,12 @@ export interface Config {
    */
   full_access: boolean;
   /**
+   * Tasks on a git workspace each work in their own worktree (branch bf/<id>) and merge back into
+   * the workspace's checked-out branch at `bf task done`, so they can run side by side. Off: one
+   * task per workspace at a time.
+   */
+  worktrees: boolean;
+  /**
    * Self-recovery. auto_resume_minutes: after a halt, switch back on by itself after this long
    * (doubling each time in a row, up to 6 hours; 0 = wait for the owner). stale_seconds: `bf engine-check`
    * reports the engine as hung when its heartbeat is older than this.
@@ -83,6 +89,7 @@ export const DEFAULT_CONFIG: Config = {
   claude_command: ['claude'],
   default_model: null,
   full_access: false,
+  worktrees: false,
   watchdog: { auto_resume_minutes: 10, stale_seconds: 120 },
 };
 

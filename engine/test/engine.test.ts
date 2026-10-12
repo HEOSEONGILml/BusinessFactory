@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -250,6 +251,31 @@ describe('엔진', () => {
     await engine.drain();
     const first = calls().map((c) => c.task);
     assert.deepEqual(first.sort(), ['T0001', 'T0003']);
+  });
+
+  it('worktrees 를 켜면 같은 git 작업 공간의 업무도 동시에 돌고, 끝나면 각자의 변경이 모두 반영된다', async () => {
+    const { engine, board, calls, paths } = setup({ worker: 'edit', reviewer: 'pass' }, { max_concurrency: 2, worktrees: true });
+    const main = path.join(paths.workspaces, 'a');
+    fs.mkdirSync(main, { recursive: true });
+    const git = (...a: string[]) => spawnSync('git', ['-C', main, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+    fs.writeFileSync(path.join(main, 'README.md'), '앱\n');
+    git('init', '-q', '-b', 'main');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'init');
+    for (const t of ['첫째', '둘째']) {
+      board.createTask('owner', { title: t, assignee: 'worker', doneWhen: ['x'], parent: null, workspace: 'a' });
+    }
+    engine.recover();
+    engine.tick();
+    await engine.drain();
+    assert.deepEqual(calls().map((c) => c.task).sort(), ['T0001', 'T0002'], '한 작업 공간이라도 함께 시작한다');
+    assert.ok(calls().every((c) => /\.worktrees/.test(c.prompt)), '각자 자기 worktree 에서 일한다');
+    await engine.runUntilIdle();
+    assert.deepEqual(board.list().map((t) => t.status), ['done', 'done']);
+    assert.ok(fs.existsSync(path.join(main, 'T0001.txt')));
+    assert.ok(fs.existsSync(path.join(main, 'T0002.txt')));
+    assert.equal(git('status', '--porcelain').stdout.trim(), '');
+    assert.equal(git('worktree', 'list').stdout.trim().split('\n').length, 1, '끝난 업무의 worktree 는 정리된다');
   });
 
   it('직원의 활동을 실시간으로 기록한다', async () => {

@@ -24,7 +24,7 @@ schedules: []
 `;
 
 /** A new company runs as the templates (handbook, staff) are written: full access, one model for everyone. */
-const NEW_COMPANY_CONFIG = { full_access: true, default_model: 'claude-opus-5-5' };
+const NEW_COMPANY_CONFIG = { full_access: true, default_model: 'claude-opus-5-5', worktrees: true };
 
 /** Creates the company data folder from templates. Safe to re-run: never overwrites existing files. */
 export function initCompany(paths: Paths, opts: { git: boolean }): InitResult {

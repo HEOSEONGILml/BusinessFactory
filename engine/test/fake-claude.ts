@@ -118,6 +118,15 @@ switch (behaviour) {
     bf('task', 'done', taskId, '--summary', '완료');
     reply('완료함');
     break;
+  case 'edit': {
+    // Change the workspace it was pointed at (its worktree, if it has one), then report.
+    const dir = /- 작업 공간: (.+)/.exec(prompt)![1].trim();
+    fs.writeFileSync(path.join(dir, `${taskId}.txt`), `${taskId} 변경`);
+    fs.writeFileSync(path.join('output', 'result.md'), '결과');
+    bf('task', 'done', taskId, '--summary', '고침');
+    reply('고침');
+    break;
+  }
   case 'pass':
     bf('task', 'pass', taskId, '--note', 'ok');
     reply('통과');

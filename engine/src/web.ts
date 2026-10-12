@@ -206,7 +206,7 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
     agents: listAgents(paths).map((a) => ({ name: a.name, model: a.model, description: a.description })),
     office: buildOffice(board, listAgents(paths).map((a) => ({ name: a.name, model: a.model, description: a.description })), tasks, engine),
     workspaces: fs.existsSync(paths.workspaces)
-      ? fs.readdirSync(paths.workspaces, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+      ? fs.readdirSync(paths.workspaces, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name)
       : [],
     memory: listMemory(paths).map((m) => ({ topic: m.topic, title: m.title, entries: m.entries })),
   };

@@ -24,6 +24,7 @@ import {
 import type { Conversation, DueReply } from './chat.ts';
 import { dueSchedules } from './schedule.ts';
 import { WINDOW_LABEL } from './stream.ts';
+import { ensureWorktree, removeWorktree, usesWorktrees } from './worktree.ts';
 import type { RunEvent, UsageSnapshot } from './stream.ts';
 import { buildSender, OwnerNotifier } from './notify.ts';
 import type { Sender } from './notify.ts';
@@ -195,6 +196,7 @@ export class Engine {
     if (this.haltReason && !this.autoResume()) return;
     this.notifyOwner();
     this.reportOrigins();
+    this.cleanWorktrees();
     if (!this.enabled) return;
     this.fireSchedules();
     if (this.pausedUntil) {
@@ -206,7 +208,7 @@ export class Engine {
     for (const { task, kind } of this.candidates()) {
       if (this.active.size >= this.config.max_concurrency) break;
       // Re-check: an earlier launch in this same pass may have taken the workspace.
-      if (kind === 'work' && task.workspace && [...this.active.values()].some((a) => a.workspace === task.workspace)) {
+      if (kind === 'work' && this.exclusiveWorkspace(task) && [...this.active.values()].some((a) => a.workspace === task.workspace)) {
         continue;
       }
       try {
@@ -257,6 +259,47 @@ export class Engine {
     if (this.active.size > 0) this.log(`진행 중인 실행 ${this.active.size}건이 끝나기를 기다립니다...`);
     await this.drain();
     if (this.haltReason) this.log(`엔진 정지: ${this.haltReason}`);
+  }
+
+  // ---- worktrees ----
+
+  /** A task that must have its workspace to itself (no worktree for it). */
+  private exclusiveWorkspace(task: Task): boolean {
+    return task.workspace !== null && !(this.config.worktrees && usesWorktrees(this.paths, task.workspace));
+  }
+
+  /** Tasks that ended no longer need their worktree; their branch goes too once merged. */
+  private cleanWorktrees(): void {
+    for (const t of this.board.list()) {
+      if (!t.worktree || t.worktree.removed || !isTerminal(t.status) || this.active.has(t.id)) continue;
+      try {
+        removeWorktree(this.paths, t);
+        this.board.setWorktree(t.id, { ...t.worktree, removed: true });
+        this.log(`${t.id} worktree 정리 (${t.worktree.branch}${t.status === 'done' ? ', 병합됨' : ', 브랜치는 보관'})`);
+      } catch (e) {
+        this.log(`${t.id} worktree 정리 실패: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  /** The folder the employee works in: the task's own worktree when it has one, else the workspace. */
+  private workDir(task: Task, kind: RunKind): string | null {
+    if (!task.workspace) return null;
+    const main = path.join(this.paths.workspaces, task.workspace);
+    if (kind === 'review') return task.worktree && !task.worktree.removed && fs.existsSync(task.worktree.path) ? task.worktree.path : main;
+    if (!this.config.worktrees || !usesWorktrees(this.paths, task.workspace)) return main;
+    try {
+      const wt = ensureWorktree(this.paths, task);
+      if (!wt) return main;
+      if (task.worktree?.path !== wt.path || task.worktree?.removed) {
+        this.board.setWorktree(task.id, wt);
+        task.worktree = wt;
+      }
+      return wt.path;
+    } catch (e) {
+      this.log(`${task.id} worktree 를 만들지 못해 작업 공간에서 직접 실행: ${e instanceof Error ? e.message : String(e)}`);
+      return main;
+    }
   }
 
   // ---- messenger and meetings ----
@@ -735,7 +778,7 @@ export class Engine {
     // Reviews first: they unblock waiting parents and cost little.
     return [...reviews, ...work].filter(({ task, kind }) => {
       if (this.active.has(task.id) || this.missingAgent.has(`${kind}:${task.id}`)) return false;
-      if (kind === 'work' && task.workspace && busyWorkspaces.has(task.workspace)) return false;
+      if (kind === 'work' && task.workspace && busyWorkspaces.has(task.workspace) && this.exclusiveWorkspace(task)) return false;
       return true;
     });
   }
@@ -758,7 +801,8 @@ export class Engine {
       taskId: task.id,
       kind,
       agent: agent.name,
-      workspace: task.workspace,
+      // Worktree tasks don't hold the workspace; others have it to themselves.
+      workspace: kind === 'work' && this.exclusiveWorkspace(task) ? task.workspace : null,
       startedAt: this.now().toISOString(),
       promise: Promise.resolve(),
     };
@@ -775,8 +819,8 @@ export class Engine {
 
   private buildSpec(task: Task, kind: RunKind, agent: AgentInfo): RunSpec {
     const taskDir = this.board.taskDir(task.id);
-    const workspaceDir = task.workspace ? path.join(this.paths.workspaces, task.workspace) : null;
-    if (workspaceDir) fs.mkdirSync(workspaceDir, { recursive: true });
+    if (task.workspace) fs.mkdirSync(path.join(this.paths.workspaces, task.workspace), { recursive: true });
+    const workspaceDir = this.workDir(task, kind);
 
     // Employees change only their own task folder and workspace; reviewers change nothing.
     const access: Access =
@@ -824,6 +868,13 @@ export class Engine {
       `- 먼저 \`bf task show ${task.id}\` 로 지시서, 하위 업무, 이력을 확인하세요.`,
     ];
     if (workspaceDir) lines.push(`- 작업 공간: ${workspaceDir}`);
+    if (task.worktree && !task.worktree.removed && workspaceDir === task.worktree.path) {
+      lines.push(
+        `- 이 작업 공간은 이 업무 전용 git worktree 입니다 (브랜치 ${task.worktree.branch}, 기준 ${task.worktree.base}). 다른 업무가 같은 저장소를 동시에 고치고 있으니 이 폴더에서만 작업하고, 원래 작업 공간 폴더(${path.join(this.paths.workspaces, task.workspace ?? '')})는 고치지 마세요. 브랜치를 바꾸거나(checkout) 기준 브랜치에 직접 커밋하지 마세요.`,
+        `- 커밋은 해도 되고 안 해도 됩니다. \`bf task done\` 을 하면 남은 변경을 커밋하고, ${task.worktree.base} 를 합친 뒤 ${task.worktree.base} 에 반영합니다. 충돌이 나면 완료 보고가 거부되고 충돌 파일이 표시되니, 이 폴더에서 해결하고 git add, git commit 한 뒤 다시 완료 보고하세요.`,
+        `- node_modules, .env, 빌드 결과물 같은 git 제외 파일은 원래 작업 공간과 링크로 공유됩니다.`,
+      );
+    }
     if (task.origin) {
       lines.push(
         `- 이 업무는 사용자가 메신저에서 부탁한 일입니다. 맥락이 필요하면 \`bf chat read ${task.origin.conv}\` 로 대화를 읽으세요. 끝나면 완료 보고 요약이 그 대화에 자동으로 올라가니, 요약은 사용자에게 답하듯 쓰세요.`,
