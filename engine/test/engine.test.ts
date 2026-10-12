@@ -337,6 +337,32 @@ describe('엔진', () => {
     assert.equal(snap.windows.five_hour.utilization, 0.95);
   });
 
+  it('구독 사용량이 감속 기준(90%)을 넘으면 동시 실행을 1개로 줄이고, 창이 리셋되면 되돌린다', async () => {
+    const { engine, board, calls, notices, paths, logs } = setup({ ceo: 'done', reviewer: 'pass' }, { max_concurrency: 3 });
+    const snap = (util: number, resetsAt: number) =>
+      fs.writeFileSync(
+        path.join(paths.company, '.engine-usage.json'),
+        JSON.stringify({ at: new Date().toISOString(), status: 'allowed', windows: { five_hour: { utilization: util, resetsAt } } }),
+      );
+    for (const t of ['a', 'b', 'c']) goal(board, t);
+    snap(0.92, Math.floor(Date.now() / 1000) + 3600);
+    engine.recover();
+    engine.tick();
+    await engine.drain();
+    assert.equal(calls().length, 1, '감속 중에는 한 명만 돈다');
+    assert.match(engine.throttledReason ?? '', /5시간 92%/);
+    assert.ok(notices.some((n) => n.title === '사용량 감속'));
+    assert.equal(engine.pausedUntilTime, null, '감속은 멈춤이 아니다');
+
+    // 창이 리셋되면(resetsAt 경과) 원래 동시 실행으로 돌아간다.
+    snap(0.92, Math.floor(Date.now() / 1000) - 10);
+    engine.tick();
+    await engine.drain();
+    assert.equal(engine.throttledReason, null);
+    assert.ok(logs.some((l) => l.includes('사용량 감속 해제')));
+    assert.ok(calls().length >= 3, `리셋 뒤에는 여러 건이 함께 돈다 (${calls().length})`);
+  });
+
   it('재시작 시 진행 중으로 남은 업무를 대기로 되돌린다', () => {
     const { engine, board } = setup({});
     goal(board);

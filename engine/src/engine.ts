@@ -32,6 +32,7 @@ import { dueSchedules } from './schedule.ts';
 import { charterOf, journalFile, listMissions, missionExists, missionFile, MissionLoop, readMission } from './missions.ts';
 import { createPrivateRemote, hasCommits, initWorkspaceRepo, isRepo } from './remote.ts';
 import { WINDOW_LABEL } from './stream.ts';
+import { readUsageSnapshot } from './watch.ts';
 import { ensureWorktree, removeWorktree, usesWorktrees } from './worktree.ts';
 import type { RunEvent, UsageSnapshot } from './stream.ts';
 import { buildSender, OwnerNotifier } from './notify.ts';
@@ -194,6 +195,48 @@ export class Engine {
     return this.pausedUntil;
   }
 
+  /** Why work is held to usage_throttle.max_concurrency right now, or null when running at full width. */
+  get throttledReason(): string | null {
+    return this.throttled;
+  }
+
+  private throttled: string | null = null;
+
+  /**
+   * Run slots for this pass: max_concurrency, or usage_throttle.max_concurrency while the latest
+   * usage snapshot shows a window at or past its throttle share (until that window resets).
+   * Logs and notifies only when the state changes.
+   */
+  private slotCap(): number {
+    const full = this.config.max_concurrency;
+    const t = this.config.usage_throttle;
+    let reason: string | null = null;
+    const snap = t ? readUsageSnapshot(this.paths) : null;
+    if (snap) {
+      const now = this.now().getTime();
+      const reasons: string[] = [];
+      for (const [name, w] of Object.entries(snap.windows ?? {})) {
+        const at = t.at?.[name];
+        if (at === undefined || !(w.utilization >= at)) continue;
+        if (w.resetsAt && w.resetsAt * 1000 <= now) continue; // that window has reset since
+        reasons.push(`${WINDOW_LABEL[name] ?? name} ${Math.round(w.utilization * 100)}% (감속 기준 ${Math.round(at * 100)}%)`);
+      }
+      if (reasons.length) reason = reasons.join(', ');
+    }
+    if (reason !== this.throttled) {
+      if (reason) {
+        this.log(`사용량 감속: ${reason}. 동시 실행 ${full} → ${Math.max(1, t.max_concurrency)}`);
+        if (!this.throttled) {
+          this.notify({ title: '사용량 감속', body: `${reason}\n동시에 도는 직원을 ${Math.max(1, t.max_concurrency)}명으로 줄입니다.` });
+        }
+      } else {
+        this.log(`사용량 감속 해제, 동시 실행 ${full}`);
+      }
+      this.throttled = reason;
+    }
+    return reason ? Math.min(full, Math.max(1, t.max_concurrency)) : full;
+  }
+
   /** Call once before the first tick. */
   recover(): void {
     for (const t of this.board.list()) {
@@ -225,8 +268,9 @@ export class Engine {
       this.pausedUntil = null;
     }
 
+    const cap = this.slotCap();
     for (const { task, kind } of this.candidates()) {
-      if (this.active.size >= this.config.max_concurrency) break;
+      if (this.active.size >= cap) break;
       // Re-check: an earlier launch in this same pass may have taken the workspace.
       if (kind === 'work' && this.exclusiveWorkspace(task) && [...this.active.values()].some((a) => a.workspace === task.workspace)) {
         continue;

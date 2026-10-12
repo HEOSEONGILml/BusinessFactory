@@ -30,6 +30,12 @@ export interface Config {
    * Leaves room for the owner's own Claude use. Windows: five_hour, seven_day.
    */
   usage_ceiling: Record<string, number>;
+  /**
+   * Slow down before the ceiling: once a window's used share reaches `at[window]` (0..1), at most
+   * `max_concurrency` work/review runs go at once (instead of the usual max_concurrency).
+   * Keep `at` below usage_ceiling, or the full stop comes first.
+   */
+  usage_throttle: { at: Record<string, number>; max_concurrency: number };
   /** Messenger and meetings: replies run as short employee runs (read-only unless full_access). */
   chat: {
     max_concurrency: number;
@@ -145,7 +151,8 @@ export const DEFAULT_CONFIG: Config = {
   poll_seconds: 5,
   project_priority: {},
   notify: DEFAULT_NOTIFY,
-  usage_ceiling: { five_hour: 0.9, seven_day: 0.9 },
+  usage_ceiling: { five_hour: 0.95, seven_day: 0.95 },
+  usage_throttle: { at: { five_hour: 0.9, seven_day: 0.9 }, max_concurrency: 1 },
   web: { enabled: true, port: 4300, open_browser: true, allowed_hosts: [] },
   chat: { max_concurrency: 2, max_chain: 3, max_turns: 12, timeout_minutes: 5, meeting_turns_per_participant: 2 },
   claude_command: ['claude'],
@@ -163,6 +170,11 @@ export function loadConfig(paths: Paths): Config {
   const raw = YAML.parse(fs.readFileSync(paths.config, 'utf8')) ?? {};
   return { ...DEFAULT_CONFIG, ...raw, notify: { ...DEFAULT_NOTIFY, ...(raw.notify ?? {}) },
     usage_ceiling: { ...DEFAULT_CONFIG.usage_ceiling, ...(raw.usage_ceiling ?? {}) },
+    usage_throttle: {
+      ...DEFAULT_CONFIG.usage_throttle,
+      ...(raw.usage_throttle ?? {}),
+      at: { ...DEFAULT_CONFIG.usage_throttle.at, ...(raw.usage_throttle?.at ?? {}) },
+    },
     web: { ...DEFAULT_CONFIG.web, ...(raw.web ?? {}) },
     chat: { ...DEFAULT_CONFIG.chat, ...(raw.chat ?? {}) },
     watchdog: { ...DEFAULT_CONFIG.watchdog, ...(raw.watchdog ?? {}) },
