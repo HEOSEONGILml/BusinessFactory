@@ -17,10 +17,11 @@ describe('웹 화면', () => {
   let server: http.Server;
   let board: Board;
   let token = '';
+  let paths: ReturnType<typeof resolvePaths>;
 
   before(async () => {
     const root = makeRoot();
-    const paths = resolvePaths({ BF_ROOT: root });
+    paths = resolvePaths({ BF_ROOT: root });
     board = new Board(paths, DEFAULT_CONFIG);
     server = startWeb(paths, DEFAULT_CONFIG, { port: PORT, log: () => {} });
     await new Promise((r) => server.once('listening', r));
@@ -168,6 +169,42 @@ describe('웹 화면', () => {
     assert.deepEqual(Buffer.from(await r.arrayBuffer()), PNG);
     const text = await fetch(`${BASE}/api/task/${id}/file?raw=1&path=report.md`);
     assert.equal(text.status, 400);
+  });
+
+  it('결과물을 내려받을 수 있다', async () => {
+    const id = board.list()[0].id;
+    fs.writeFileSync(path.join(board.taskDir(id), 'output', '보고서.md'), '# 내용');
+    const r = await fetch(`${BASE}/api/task/${id}/file?download=1&path=${encodeURIComponent('보고서.md')}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'application/octet-stream');
+    assert.match(r.headers.get('content-disposition') ?? '', /^attachment;.*filename\*=UTF-8''%EB%B3%B4/);
+    assert.equal(await r.text(), '# 내용');
+    const bad = await fetch(`${BASE}/api/task/${id}/file?download=1&path=${encodeURIComponent('../task.md')}`);
+    assert.equal(bad.status, 400);
+  });
+
+  it('작업 공간의 파일은 경로로 내려받고, 비밀값과 바깥 파일은 막는다', async () => {
+    const ws = path.join(paths.workspaces, 'app');
+    fs.mkdirSync(path.join(ws, 'web'), { recursive: true });
+    fs.mkdirSync(path.join(ws, 'deploy'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'web', 'app.ait'), Buffer.from([1, 2, 3]));
+    fs.writeFileSync(path.join(ws, 'deploy', '.env'), 'KEY=secret');
+    fs.writeFileSync(path.join(ws, 'deploy', 'id_ed25519'), 'secret');
+    const dl = (p: string) => fetch(`${BASE}/api/download?path=${encodeURIComponent(p)}`);
+
+    const abs = await dl(path.join(ws, 'web', 'app.ait'));
+    assert.equal(abs.status, 200);
+    assert.match(abs.headers.get('content-disposition') ?? '', /filename="app.ait"/);
+    assert.deepEqual([...Buffer.from(await abs.arrayBuffer())], [1, 2, 3]);
+    assert.equal((await dl('workspaces/app/web/app.ait')).status, 200, '시스템 루트 기준 상대 경로');
+
+    for (const p of [path.join(ws, 'deploy', '.env'), path.join(ws, 'deploy', 'id_ed25519'), paths.config, path.join(ws, 'web', '..', '..', '..', 'company', 'config.yaml'), '/etc/passwd', path.join(ws, 'web')]) {
+      const r = await dl(p);
+      assert.equal(r.status, 400, p);
+      await r.text();
+    }
+    const state = await (await fetch(`${BASE}/api/state`)).json();
+    assert.deepEqual(state.files.dirs, [paths.board, paths.workspaces]);
   });
 });
 

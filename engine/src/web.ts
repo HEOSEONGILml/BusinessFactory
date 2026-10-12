@@ -209,6 +209,8 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
       ? fs.readdirSync(paths.workspaces, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name)
       : [],
     memory: listMemory(paths).map((m) => ({ topic: m.topic, title: m.title, entries: m.entries })),
+    // Where downloadable files live, so the page can turn file paths in text into download links.
+    files: { root: paths.root, dirs: [paths.board, paths.workspaces] },
   };
 }
 
@@ -291,6 +293,46 @@ function outputPath(board: Board, id: string, rel: string): string {
   if (!full.startsWith(outDir + path.sep)) throw new BoardError('결과물 폴더 밖의 파일은 볼 수 없습니다.');
   if (!fs.existsSync(full)) throw new BoardError('파일이 없습니다.');
   return full;
+}
+
+// Never handed out by the download link, even inside the allowed folders.
+const SECRET_FILE = /^(\.env(\..*)?|\.npmrc|\.netrc|\.pypirc|.*\.(pem|key|p12|pfx|keystore|jks)|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|known_hosts|authorized_keys|credentials(\.json)?|secrets?(\..*)?|web-auth.*)$/i;
+const SECRET_DIR = new Set(['.git', '.ssh', '.gnupg', '.aws', '.engine', 'node_modules']);
+
+/**
+ * A file employees mention (e.g. a build artifact in a workspace), resolved for download.
+ * Accepts an absolute path or one relative to the system root; only regular files inside the
+ * board or the workspaces, and never anything that looks like a secret.
+ */
+export function downloadPath(paths: Paths, p: string): string {
+  const raw = p.trim().replace(/^[`'"]+|[`'"]+$/g, '');
+  if (!raw) throw new BoardError('파일 경로가 없습니다.');
+  const full = path.resolve(paths.root, raw);
+  if (!fs.existsSync(full)) throw new BoardError('파일이 없습니다.');
+  const real = fs.realpathSync(full);
+  const roots = [paths.board, paths.workspaces].filter((r) => fs.existsSync(r)).map((r) => fs.realpathSync(r));
+  const root = roots.find((r) => real.startsWith(r + path.sep));
+  if (!root) throw new BoardError('업무 폴더와 작업 공간 안의 파일만 내려받을 수 있습니다.');
+  const segs = path.relative(root, real).split(path.sep);
+  if (segs.some((s) => SECRET_DIR.has(s)) || SECRET_FILE.test(segs[segs.length - 1])) {
+    throw new BoardError('비밀값이 들어 있을 수 있는 파일은 내려받을 수 없습니다.');
+  }
+  if (!fs.statSync(real).isFile()) throw new BoardError('파일만 내려받을 수 있습니다.');
+  return real;
+}
+
+function sendDownload(res: http.ServerResponse, full: string) {
+  const name = path.basename(full);
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': String(fs.statSync(full).size),
+    'Content-Disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+  });
+  fs.createReadStream(full).pipe(res);
 }
 
 function readOutput(board: Board, id: string, rel: string): string {
@@ -421,6 +463,9 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
       }
       if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'task' && parts[2]) {
         const id = normalizeId(parts[2]);
+        if (parts[3] === 'file' && url.searchParams.has('download')) {
+          return sendDownload(res, outputPath(board, id, url.searchParams.get('path') ?? ''));
+        }
         if (parts[3] === 'file' && url.searchParams.has('raw')) {
           const full = outputPath(board, id, url.searchParams.get('path') ?? '');
           const type = imageType(full);
@@ -429,6 +474,11 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
         }
         if (parts[3] === 'file') return send(res, 200, { text: readOutput(board, id, url.searchParams.get('path') ?? '') });
         return send(res, 200, taskDetail(board, id));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/download') {
+        const full = downloadPath(paths, url.searchParams.get('path') ?? '');
+        log(`웹: 파일 내려받기 ${path.relative(paths.root, full)}`);
+        return sendDownload(res, full);
       }
       if (req.method === 'GET' && url.pathname === '/api/attachment') {
         const { full, type } = resolveAttachment(paths, url.searchParams.get('path') ?? '');

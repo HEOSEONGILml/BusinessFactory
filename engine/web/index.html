@@ -214,6 +214,9 @@ dialog::backdrop { background: rgba(10,14,22,.55); }
 .logopts { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13.5px; color: var(--muted); padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .logopts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .files { display: flex; gap: 8px; flex-wrap: wrap; }
+.files .fitem { display: inline-flex; gap: 2px; }
+a.dl { color: var(--accent, #2563eb); text-decoration: none; border-bottom: 1px dashed currentColor; word-break: break-all; }
+a.dl::after { content: ' ⬇'; font-size: .9em; }
 .actfeed { font-size: 14px; }
 .actfeed div { padding: 3px 0; border-bottom: 1px dashed var(--line); color: var(--muted); }
 
@@ -552,7 +555,31 @@ function inlineMd(s) {
       return `<a class="att" href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="${alt}" loading="lazy"></a>`;
     })
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>')
+    .replace(filePathRe() ?? /$^/, (_, pre, p) => `${pre}<a class="dl" href="${downloadUrl(p.replace(/&amp;/g, '&'))}" download title="내 PC로 내려받기">${p}</a>`);
+}
+/*
+ * File paths employees write (e.g. a build artifact in a workspace on the server) become
+ * download links, so the owner never has to log in to the server to fetch a file.
+ */
+const downloadUrl = (p) => `/api/download?path=${encodeURIComponent(p)}`;
+let pathRe = null, pathReKey = '';
+function filePathRe() {
+  const f = state?.files;
+  if (!f) return null;
+  const key = JSON.stringify(f);
+  if (key !== pathReKey) {
+    const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const prefixes = [];
+    for (const d of f.dirs) {
+      prefixes.push(d);
+      if (d.startsWith(f.root + '/')) prefixes.push(d.slice(f.root.length + 1));
+    }
+    pathRe = new RegExp(`(^|[^\\w/.-])((?:${prefixes.map(reEsc).join('|')})/[^\\s<>"'\`|()\\[\\],]*\\.[A-Za-z0-9]{1,8})(?![\\w/-])`, 'g');
+    pathReKey = key;
+  }
+  pathRe.lastIndex = 0;
+  return pathRe;
 }
 function md(src) {
   const lines = String(src ?? '').replace(/\r/g, '').split('\n');
@@ -935,7 +962,7 @@ async function openTask(id, from) {
     ${d.tree.length ? `<h4>하위 업무 ${d.tree.length}건</h4><div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${d.tree.map((c, k) => `<div class="trow" data-open="${c.id}" style="padding-left:${14 + (c.depth - 1) * 20}px${k === 0 ? ';border-top:none' : ''}"><span class="id">${c.id}</span><span>${esc(c.title)} <span class="who">· ${esc(c.assignee === state.owner ? '나' : c.assignee)}</span></span><span class="chip s-${c.status}">${esc(c.label)}</span></div>`).join('')}</div>` : ''}
     <div class="tabs"><button data-tab="brief" class="on">지시서</button><button data-tab="out">결과물 (${d.outputs.length})</button><button data-tab="cmt">코멘트 (${d.thread.filter((e) => !e.event).length})</button><button data-tab="log">이력</button><button data-tab="act">활동</button></div>
     <div data-pane="brief" class="prose">${md(d.body)}</div>
-    <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint);font-weight:500">${(o.size / 1024).toFixed(1)}KB</span></button>`).join('')}</div><div id="fileView" class="prose" style="margin-top:16px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
+    <div data-pane="out" hidden>${d.outputs.length ? `<div class="files">${d.outputs.map((o) => `<span class="fitem"><button class="btn small" data-file="${esc(o.path)}">${esc(o.path)} <span style="color:var(--faint);font-weight:500">${(o.size / 1024).toFixed(1)}KB</span></button><a class="btn small" href="/api/task/${id}/file?download=1&path=${encodeURIComponent(o.path)}" download title="내 PC로 내려받기">⬇</a></span>`).join('')}</div><div id="fileView" class="prose" style="margin-top:16px"></div>` : '<div class="empty">아직 결과물이 없습니다</div>'}</div>
     <div data-pane="cmt" hidden>${threadHistory(d.thread)}</div>
     <div data-pane="log" hidden>
       <div class="logopts">
