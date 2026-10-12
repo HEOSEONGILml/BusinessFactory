@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { BoardError } from '../src/board.ts';
 import { DEFAULT_CONFIG } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { Engine } from '../src/engine.ts';
@@ -141,6 +142,25 @@ describe('엔진', () => {
     }
     const defs = JSON.parse(fs.readFileSync(work.args[work.args.indexOf('--agents') + 1], 'utf8'));
     assert.equal(defs.ceo.model, 'claude-opus-5-5');
+  });
+
+  it('후보로 고른 뒤 상태가 바뀐 업무는 건너뛰고 엔진은 계속 돈다', async () => {
+    const { engine, board, calls, logs } = setup({ ceo: 'done', reviewer: 'pass' });
+    goal(board);
+    const start = board.start.bind(board);
+    let first = true;
+    board.start = (id, actor) => {
+      if (first) {
+        first = false;
+        throw new BoardError(`${id}: 취소 → 진행 전환은 허용되지 않습니다.`);
+      }
+      return start(id, actor);
+    };
+    await engine.runUntilIdle();
+    assert.ok(logs.some((l) => /T0001 시작 건너뜀/.test(l)));
+    assert.equal(calls().length, 0, '건너뛴 패스에서는 실행하지 않는다');
+    await engine.runUntilIdle();
+    assert.equal(board.read('T0001').task.status, 'done');
   });
 
   it('보고 없이 끝나면 재시도하고, 한도를 넘으면 실패한다', async () => {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAgent, listAgents } from './agents.ts';
 import type { AgentInfo } from './agents.ts';
-import { Board, DEFAULT_GOAL_DONE_WHEN, isTerminal, STATUS_LABEL } from './board.ts';
+import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { writeFileAtomic } from './fsutil.ts';
@@ -208,7 +208,13 @@ export class Engine {
       if (kind === 'work' && task.workspace && [...this.active.values()].some((a) => a.workspace === task.workspace)) {
         continue;
       }
-      this.launch(task, kind);
+      try {
+        this.launch(task, kind);
+      } catch (e) {
+        // The task changed since candidates() read it (e.g. the owner cancelled it): skip it.
+        if (!(e instanceof BoardError)) throw e;
+        this.log(`${task.id} 시작 건너뜀: ${e.message}`);
+      }
     }
     this.tickChat();
   }
@@ -238,7 +244,12 @@ export class Engine {
     this.log(`엔진 ${this.enabled ? '시작' : '대기(꺼짐)'} (동시 실행 ${this.config.max_concurrency}, 직원 ${listAgents(this.paths).length}명)`);
     // Keeps running while switched off or halted, so the web console can turn it back on.
     while (!signal.aborted) {
-      this.tick();
+      try {
+        this.tick();
+      } catch (e) {
+        // One bad pass must not take the whole company down; log it and try again next poll.
+        this.log(`!!! 엔진 처리 중 오류 (다음 주기에 다시 시도): ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+      }
       this.heartbeat();
       await sleep(this.config.poll_seconds * 1000, signal);
     }
