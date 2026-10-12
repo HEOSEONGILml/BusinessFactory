@@ -171,6 +171,7 @@ export function buildState(board: Board, paths: Paths, engine: EngineStatus) {
       title: t.title,
       body: board.read(t.id).body,
       waitingOn: t.depends_on.filter((d) => byId.get(d)?.status !== 'done'),
+      files: prerequisiteFiles(board, paths, t),
     }));
   const finished = tasks
     .filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && t.status !== 'canceled')
@@ -232,7 +233,7 @@ function chatList(board: Board, paths: Paths) {
     .sort((a, b) => (b.last?.at ?? b.created_at).localeCompare(a.last?.at ?? a.created_at));
 }
 
-function taskDetail(board: Board, id: string) {
+function taskDetail(board: Board, paths: Paths, id: string) {
   const { task, body } = board.read(id);
   const dir = board.taskDir(id);
   const outDir = path.join(dir, 'output');
@@ -260,6 +261,7 @@ function taskDetail(board: Board, id: string) {
     },
     activity,
     outputs,
+    prereqFiles: board.isOwnerTask(task) ? prerequisiteFiles(board, paths, task) : [],
     children: board.children(id).map((c) => ({ id: c.id, title: c.title, status: c.status, label: statusLabel(c), assignee: c.assignee })),
     // Every task below this one, depth-first, with its history: one timeline for the whole tree.
     tree: descendants(board, id).map(({ task: c, depth }) => ({
@@ -319,6 +321,43 @@ export function downloadPath(paths: Paths, p: string): string {
   }
   if (!fs.statSync(real).isFile()) throw new BoardError('파일만 내려받을 수 있습니다.');
   return real;
+}
+
+/**
+ * Files the owner needs from the work their task builds on: what the prerequisite tasks
+ * produced (output/) and every downloadable file their completion reports name. Shown as
+ * download links on the owner's card, so a hand-off never depends on the manager having
+ * copied the right path into the instructions before that work was even done.
+ */
+export function prerequisiteFiles(board: Board, paths: Paths, task: Task): { from: string; path: string }[] {
+  const seen = new Set<string>();
+  const files: { from: string; path: string }[] = [];
+  const add = (from: string, p: string) => {
+    try {
+      const full = downloadPath(paths, p);
+      if (seen.has(full)) return;
+      seen.add(full);
+      files.push({ from, path: full });
+    } catch {
+      // not a downloadable file: skip
+    }
+  };
+  for (const dep of task.depends_on) {
+    let doc;
+    try { doc = board.read(dep); } catch { continue; }
+    if (doc.task.status !== 'done' && doc.task.status !== 'review') continue; // only once it has reported its result
+    const summary = lastLogEntry(board.readLog(dep), '완료보고');
+    for (const m of summary.matchAll(/\/[^\s`'"<>()|,]+/g)) {
+      add(dep, m[0].replace(/[.~]+$/, ''));
+    }
+    const outDir = path.join(board.taskDir(dep), 'output');
+    if (fs.existsSync(outDir)) {
+      for (const d of fs.readdirSync(outDir, { recursive: true, withFileTypes: true })) {
+        if (d.isFile()) add(dep, path.join(d.parentPath, d.name));
+      }
+    }
+  }
+  return files;
 }
 
 function sendDownload(res: http.ServerResponse, full: string) {
@@ -473,7 +512,7 @@ export function startWeb(paths: Paths, config: Config, opts: WebOptions): http.S
           return sendImage(res, full, type);
         }
         if (parts[3] === 'file') return send(res, 200, { text: readOutput(board, id, url.searchParams.get('path') ?? '') });
-        return send(res, 200, taskDetail(board, id));
+        return send(res, 200, taskDetail(board, paths, id));
       }
       if (req.method === 'GET' && url.pathname === '/api/download') {
         const full = downloadPath(paths, url.searchParams.get('path') ?? '');

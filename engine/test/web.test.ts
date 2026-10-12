@@ -116,6 +116,30 @@ describe('웹 화면', () => {
     assert.equal(board.read(gc.id).task.status, 'done');
   });
 
+  it('사용자 업무 카드에 선행 업무가 만든 파일을 내려받기 링크로 붙인다', async () => {
+    const g = board.createTask('owner', { title: '번들 목표', assignee: 'ceo', doneWhen: ['x'], parent: null });
+    board.start(g.id);
+    const build = board.createTask('ceo', { title: '빌드', assignee: 'worker', doneWhen: ['x'], parent: g.id });
+    const upload = board.createTask('ceo', { title: '콘솔에 올리기', assignee: 'owner', doneWhen: ['x'], parent: g.id, dependsOn: [build.id] });
+    board.start(build.id);
+    const ait = path.join(paths.workspaces, 'proj', 'web', 'app.ait');
+    fs.mkdirSync(path.dirname(ait), { recursive: true });
+    fs.writeFileSync(ait, 'bundle');
+    fs.writeFileSync(path.join(paths.workspaces, 'proj', '.env'), 'SECRET=1');
+    const out = path.join(board.taskDir(build.id), 'output');
+    fs.mkdirSync(out, { recursive: true });
+    fs.writeFileSync(path.join(out, 'report.md'), '# 보고');
+    board.done('worker', build.id, `새 번들: \`${ait}\`. 비밀: ${path.join(paths.workspaces, 'proj', '.env')}, 없는 파일: /nope/x.ait`);
+    const state = await (await fetch(BASE + '/api/state')).json();
+    const card = state.inbox.mine.find((m: { id: string }) => m.id === upload.id);
+    const got = card.files.map((f: { path: string }) => f.path);
+    assert.ok(got.includes(fs.realpathSync(ait)), '보고에 적힌 번들 경로');
+    assert.ok(got.some((p: string) => p.endsWith('output/report.md')), '선행 업무 결과물');
+    assert.ok(!got.some((p: string) => p.endsWith('.env')), '비밀 파일은 빼기');
+    const d = await (await fetch(`${BASE}/api/task/${upload.id}`)).json();
+    assert.deepEqual(d.prereqFiles.map((f: { path: string }) => f.path), got);
+  });
+
   it('규칙 위반은 이유와 함께 400', async () => {
     const r = await post('/api/task/T0001/deny', { reason: '' });
     assert.equal(r.status, 400);
