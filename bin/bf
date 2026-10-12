@@ -1,3 +1,6 @@
 #!/bin/sh
 # bf — BusinessFactory task board CLI (used by the owner and by AI employees)
-exec node "$(dirname "$0")/../engine/src/cli.ts" "$@"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Employees call bf dozens of times per run; caching compiled code cuts each start-up.
+export NODE_COMPILE_CACHE="${NODE_COMPILE_CACHE:-$ROOT/node_modules/.cache/bf-compile}"
+exec node "$ROOT/engine/src/cli.ts" "$@"

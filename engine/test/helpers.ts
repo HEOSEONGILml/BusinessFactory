@@ -9,6 +9,8 @@ import { resolvePaths } from '../src/paths.ts';
 // Tests run inside employee runs too (npm test), where BF_COMPANY/BF_TASK/... point at the real
 // company. Drop them so nothing a test spawns can touch real data.
 for (const k of Object.keys(process.env)) if (k.startsWith('BF_')) delete process.env[k];
+// Tests spawn many short Node processes (fake employees, bf); a compile cache makes each start-up cheap.
+process.env.NODE_COMPILE_CACHE ??= path.join(import.meta.dirname, '..', '..', 'node_modules', '.cache', 'bf-compile');
 
 export const AGENTS = ['ceo', 'hr', 'reviewer', 'worker'];
 
