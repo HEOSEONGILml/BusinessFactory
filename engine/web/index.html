@@ -1269,6 +1269,7 @@ async function openConv(id, keepScroll) {
   const placeholder = meeting ? (conv.status === 'open' ? '회의에 의견을 남기세요. 특정 직원에게만 물으려면 @이름 (Enter 전송, Shift+Enter 줄바꿈)' : '끝난 회의입니다') : '메시지 (Enter 전송, Shift+Enter 줄바꿈)';
   const msgsEl = document.querySelector('#chatMain .msgs');
   const nearBottom = !msgsEl || msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+  const prevTop = msgsEl ? msgsEl.scrollTop : 0;
   const draft = document.querySelector('#chatMain textarea')?.value ?? '';
   $('#chatMain').innerHTML = `
     <div class="chat-head"><h3>${esc(title)}</h3><div class="people">${chips}</div><span style="flex:1"></span>${actions}
@@ -1280,7 +1281,8 @@ async function openConv(id, keepScroll) {
   const ta = document.querySelector('#chatMain textarea');
   if (!switching) ta.value = draft;
   const box = document.querySelector('#chatMain .msgs');
-  if (switching || nearBottom || !keepScroll) box.scrollTop = box.scrollHeight;
+  // 다시 그려도 읽던 위치를 유지한다. 맨 아래를 보고 있었을 때만 새 메시지를 따라 내려간다.
+  box.scrollTop = (switching || nearBottom || !keepScroll) ? box.scrollHeight : prevTop;
   const send = async () => {
     if (uploading(`c:${id}`)) return toast('이미지를 올리는 중입니다', true);
     const text = withAttachments(ta.value.trim(), `c:${id}`); if (!text) return;
