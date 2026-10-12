@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Board, Task } from './board.ts';
-import { isTerminal } from './board.ts';
 import { writeFileAtomic } from './fsutil.ts';
 import type { Paths } from './paths.ts';
 
@@ -104,7 +103,7 @@ export function ownerItems(board: Board): { key: string; notice: Notice }[] {
         key: `${t.id}:mine`,
         notice: { title: `사용자 업무 · ${t.id} · ${t.created_by}`, body: `${t.title}\n→ 웹 화면 처리할 일, 또는 bf task done ${num(t)} --summary "결과"` },
       });
-    } else if (t.parent === null && isTerminal(t.status) && !t.acknowledged && t.status !== 'canceled') {
+    } else if (board.finishedForOwner(t)) {
       const done = t.status === 'done';
       items.push({
         key: `${t.id}:${t.status}`,

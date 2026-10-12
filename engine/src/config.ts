@@ -11,8 +11,8 @@ export interface Config {
   ceo: string;
   /** Agent that reviews finished work. */
   reviewer: string;
-  /** Deepest allowed delegation; goals are depth 0. */
-  max_depth: number;
+  /** Deepest allowed delegation; goals are depth 0. null = no limit (missions rely on usage and failure limits instead). */
+  max_depth: number | null;
   max_attempts: number;
   max_rejections: number;
   /** How many employees may run at once (they share one subscription allowance). */
@@ -68,13 +68,53 @@ export interface Config {
    * reports the engine as hung when its heartbeat is older than this.
    */
   watchdog: { auto_resume_minutes: number; stale_seconds: number };
+  /** Missions: quarter-sized directions the company pursues step by step on its own (docs/MISSIONS.md). */
+  missions: MissionsConfig;
 }
+
+export interface MissionsConfig {
+  /**
+   * Estimated usage (usage.jsonl cost_usd_estimate) all missions may spend in a moving 7-day window.
+   * Each active mission gets budget × weight / Σ active weights; over its share its work waits. null = no budget.
+   */
+  weekly_budget_usd: number | null;
+  /** Subscription seven_day share at which mission work stops starting (room left for the owner's own goals). */
+  seven_day_ceiling: number;
+  /** A usage snapshot older than this lets one mission run through to refresh it (hours). */
+  probe_after_hours: number;
+  /** Run slots mission work may hold at once. null = max_concurrency - 1 (at least 1). */
+  max_slots: number | null;
+  /** Failed steps in a row that pause a mission. */
+  failure_streak: number;
+  /** Empty steps (nothing delegated finished, no output besides plan/report) in a row that pause a mission. */
+  empty_streak: number;
+  /** Tell the owner (without stopping) when one step grows past this many tasks or this depth. */
+  step_task_alert: number;
+  step_depth_alert: number;
+  /** Tell the owner when a step has waited on them (approval, question, owner task) this long (hours). */
+  blocked_alert_hours: number;
+  /** When the daily mission report goes to the owner (cron, local time). */
+  report_cron: string;
+}
+
+export const DEFAULT_MISSIONS: MissionsConfig = {
+  weekly_budget_usd: 300,
+  seven_day_ceiling: 0.7,
+  probe_after_hours: 6,
+  max_slots: null,
+  failure_streak: 2,
+  empty_streak: 2,
+  step_task_alert: 40,
+  step_depth_alert: 10,
+  blocked_alert_hours: 24,
+  report_cron: '0 9 * * *',
+};
 
 export const DEFAULT_CONFIG: Config = {
   owner: 'owner',
   ceo: 'ceo',
   reviewer: 'reviewer',
-  max_depth: 3,
+  max_depth: null,
   max_attempts: 3,
   max_rejections: 3,
   max_concurrency: 2,
@@ -91,6 +131,7 @@ export const DEFAULT_CONFIG: Config = {
   full_access: false,
   worktrees: false,
   watchdog: { auto_resume_minutes: 10, stale_seconds: 120 },
+  missions: DEFAULT_MISSIONS,
 };
 
 export function loadConfig(paths: Paths): Config {
@@ -101,5 +142,6 @@ export function loadConfig(paths: Paths): Config {
     web: { ...DEFAULT_CONFIG.web, ...(raw.web ?? {}) },
     chat: { ...DEFAULT_CONFIG.chat, ...(raw.chat ?? {}) },
     watchdog: { ...DEFAULT_CONFIG.watchdog, ...(raw.watchdog ?? {}) },
+    missions: { ...DEFAULT_MISSIONS, ...(raw.missions ?? {}) },
   };
 }

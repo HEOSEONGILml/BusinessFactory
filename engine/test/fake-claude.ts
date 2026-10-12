@@ -62,7 +62,7 @@ function reply(result: string, extra: Record<string, unknown> = {}) {
       status: 'allowed',
       unifiedWindows: {
         five_hour: { utilization: util, resetsAt: Math.floor(Date.now() / 1000) + 3600 },
-        seven_day: { utilization: 0.2, resetsAt: Math.floor(Date.now() / 1000) + 86400 },
+        seven_day: { utilization: Number(process.env.FAKE_SEVEN ?? '0.2'), resetsAt: Math.floor(Date.now() / 1000) + 86400 },
       },
     },
   });
@@ -148,6 +148,41 @@ switch (behaviour) {
     reply('Failed to authenticate. API Error: 401', { is_error: true, api_error_status: 401 });
     process.exitCode = 1;
     break;
+  case 'step': {
+    // A mission step: plan, do a little delegated work, report with the hand-over line.
+    // FAKE_ACHIEVE_AT=n: on step n propose that the mission is achieved.
+    const n = Number(/단계 (\d+)/.exec(task.title)?.[1] ?? '1');
+    if (board.children(taskId).length === 0) {
+      fs.writeFileSync(path.join('output', 'plan.md'), `# 계획\n단계 ${n} 계획`);
+      bf('task', 'create', '--to', 'worker', '--title', `${task.title} - 실무`, '--done-when', 'result.md 존재');
+      reply('위임함');
+    } else {
+      if (Number(process.env.FAKE_ACHIEVE_AT ?? '0') === n) bf('mission', 'achieve', task.mission!, '--summary', '성공 기준 충족');
+      fs.writeFileSync(path.join('output', 'report.md'), '단계 보고');
+      bf('task', 'done', taskId, '--summary', `단계 ${n} 끝\n다음: 랜딩 페이지 개선 ${n + 1}`);
+      reply('보고함');
+    }
+    break;
+  }
+  case 'empty-step':
+    // Reports without delegating or producing anything but paperwork.
+    fs.writeFileSync(path.join('output', 'plan.md'), '계획');
+    fs.writeFileSync(path.join('output', 'report.md'), '보고');
+    bf('task', 'done', taskId, '--summary', '한 일 없음\n다음: 같은 것');
+    reply('보고함');
+    break;
+  case 'deep': {
+    // Delegates to the same employee as long as it has no children (tests unlimited depth).
+    if (board.children(taskId).length === 0 && task.depth < Number(process.env.FAKE_DEPTH ?? '5')) {
+      bf('task', 'create', '--to', agent, '--title', `${task.title}+`, '--done-when', '결과');
+      reply('위임함');
+    } else {
+      fs.writeFileSync(path.join('output', 'result.md'), '결과');
+      bf('task', 'done', taskId, '--summary', '완료');
+      reply('완료함');
+    }
+    break;
+  }
   default:
     throw new Error(`unknown behaviour ${behaviour}`);
 }

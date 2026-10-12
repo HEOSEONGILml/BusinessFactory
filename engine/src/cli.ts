@@ -9,6 +9,28 @@ import { loadConfig } from './config.ts';
 import type { Config } from './config.ts';
 import { Engine } from './engine.ts';
 import { addMemory, listMemory, readMemory } from './memory.ts';
+import {
+  charterOf,
+  checkCharterActor,
+  createMission,
+  descendantsOf,
+  journalFile,
+  listMissions,
+  MISSION_STATUS_LABEL,
+  missionFile,
+  missionShare,
+  missionSteps,
+  missionUsage,
+  normalizeMissionId,
+  pauseMission,
+  proposeOrDecide,
+  readJournal,
+  readMission,
+  resumeMission,
+  setCharter,
+  setMission,
+  stopMission,
+} from './missions.ts';
 import { getConv, lastOwnerMessage, listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
@@ -39,10 +61,22 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf web                                  웹 화면을 엔진 꺼진 상태로 켜기 (화면에서 가동)
   bf web-password [--off]                 웹 화면 로그인 암호 설정 (--off: 해제). 외부 접속 전에 필수
 
+미션 (분기 규모의 방향. 엔진이 단계 목표를 차례로 만들어 스스로 진행)
+  bf mission create "<제목>" [--brief "<헌장>"] [--file 헌장.md] [--weight w]
+       [--until 2026-12-31] [--project p] [--workspace w]          등록 (사용자)
+  bf mission list | bf mission show <M001> [--journal n]
+  bf mission pause <M001> [--reason ...] | resume <M001>          (사용자)
+  bf mission stop <M001> [--cancel-running] [--reason ...]        (사용자)
+  bf mission set <M001> [--weight w] [--until 날짜|""] [--title ...]   (사용자)
+  bf mission charter <M001> --file <파일> | --text "<헌장>"         헌장 보강 (단계 담당자·사용자)
+  bf mission achieve <M001> --summary "<근거>"                    달성 제안 (단계 담당자, 검수 통과 시 확정)
+  bf mission stall <M001> --reason "<이유>"                       진전 없음 선언 (단계 담당자)
+
 업무
   bf task create --to <직원> --title "<제목>" --done-when "<조건>" [--done-when ...]
        [--desc "<설명>"] [--depends T0001 ...] [--no-review]
        [--workspace w] [--project p] [--priority n]
+  bf task create --plan-review [--desc "<볼 점>"]   지금 업무의 output/plan.md 비판 검토를 reviewer 에게
   bf task list [--all] [--status s] [--assignee a] [--project p]
   bf task show <id>
   bf task done <id> --summary "<요약>"
@@ -166,6 +200,9 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
 
     case 'task':
       return runTask(sub, rest, { board, actor, currentTask, io });
+
+    case 'mission':
+      return runMission(sub, rest, { board, actor, currentTask, io });
 
     case 'inbox':
       printInbox(board, io);
@@ -385,6 +422,173 @@ function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: s
   return 0;
 }
 
+/**
+ * `bf task create --plan-review`: the reviewer critiques the current task's output/plan.md before
+ * the work is handed out. Not reviewed again itself (the reviewer would be checking its own critique).
+ */
+function planReview(values: { title?: string; desc?: string; depends?: string[] }, ctx: TaskCtx): number {
+  const { board, actor, io } = ctx;
+  if (!ctx.currentTask) throw new BoardError('--plan-review 는 업무를 수행 중일 때만 쓸 수 있습니다.');
+  const parent = board.read(ctx.currentTask).task;
+  const plan = path.join(board.taskDir(parent.id), 'output', 'plan.md');
+  if (!fs.existsSync(plan)) throw new BoardError(`먼저 계획을 ${plan} 에 쓰세요.`);
+  const task = board.createTask(actor, {
+    title: values.title ?? `계획 검토: ${parent.title}`.slice(0, 120),
+    assignee: board.config.reviewer,
+    description: [
+      `업무 ${parent.id} 의 계획을 실행 전에 비판적으로 검토한다.`,
+      '',
+      `- 계획: ${plan}`,
+      `- 맥락: \`bf task show ${parent.id}\`${parent.mission ? `, 미션 헌장 ${missionFile(board.paths, parent.mission)}, 진행 기록 ${journalFile(board.paths, parent.mission)}` : ''}`,
+      '- 볼 것: 목표(헌장) 대비 방향이 맞는지, 빠진 위험·결재 대상, 더 싸고 빠른 대안, 완료 조건이 파일로 판정 가능한지, 일을 너무 잘게 쪼개지 않았는지.',
+      '- 지적마다 필수/권장을 붙이고 근거와 고칠 방법을 적는다. 마지막에 판정(승인 / 조건부 승인 / 재검토 필요)을 쓴다.',
+      ...(values.desc?.trim() ? ['', values.desc.trim()] : []),
+    ].join('\n'),
+    doneWhen: ['output/plan-review.md 에 지적(필수/권장, 근거, 고칠 방법)과 최종 판정(승인/조건부 승인/재검토 필요)이 있다'],
+    dependsOn: (values.depends ?? []).flatMap((d) => d.split(',')).filter(Boolean),
+    review: false,
+    parent: parent.id,
+  });
+  io.out(`계획 검토 업무 생성: ${task.id} → ${task.assignee} (상위 ${parent.id}). 지금 실행을 마치세요; 검토가 끝나면 다시 깨워집니다.`);
+  return 0;
+}
+
+function runMission(sub: string | undefined, args: string[], ctx: TaskCtx): number {
+  const { board, actor, io } = ctx;
+  const paths = board.paths;
+  const owner = board.config.owner;
+  const now = new Date();
+  const ownerOnly = () => {
+    if (actor !== owner) throw new BoardError('이 명령은 사용자만 쓸 수 있습니다.');
+  };
+  const parse = (options: Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>) =>
+    parseArgs({ args, allowPositionals: true, options });
+
+  switch (sub) {
+    case 'create': {
+      ownerOnly();
+      const { values, positionals } = parse({
+        brief: { type: 'string' },
+        file: { type: 'string' },
+        weight: { type: 'string' },
+        until: { type: 'string' },
+        project: { type: 'string' },
+        workspace: { type: 'string' },
+      });
+      const title = positionals.join(' ').trim();
+      const fromFile = values.file ? fs.readFileSync(path.resolve(String(values.file)), 'utf8') : '';
+      const m = createMission(paths, actor, {
+        title,
+        brief: [values.brief, fromFile].filter((x) => typeof x === 'string' && x.trim()).join('\n\n'),
+        weight: values.weight === undefined ? undefined : Number(values.weight),
+        until: (values.until as string | undefined) ?? null,
+        project: (values.project as string | undefined) ?? null,
+        workspace: (values.workspace as string | undefined) ?? null,
+      }, now);
+      io.out(`미션 등록: ${m.id} ${m.title} — 엔진이 다음 주기에 첫 단계를 만듭니다.`);
+      return 0;
+    }
+    case 'list':
+    case undefined: {
+      const missions = listMissions(paths);
+      if (missions.length === 0) io.out('미션이 없습니다.');
+      const tasks = board.list();
+      const usage = missionUsage(paths, tasks, now.getTime() - 7 * 86_400_000);
+      for (const m of missions) {
+        const steps = missionSteps(tasks, m.id);
+        const open = steps.find((t) => !isTerminal(t.status));
+        const share = missionShare(board.config, missions, m);
+        io.out(
+          `${m.id}  [${MISSION_STATUS_LABEL[m.status]}]  ${m.title}  단계 ${steps.length}` +
+            `${open ? ` (진행: ${open.id} ${STATUS_LABEL[open.status]})` : ''}  7일 $${(usage.get(m.id) ?? 0).toFixed(2)}` +
+            `${share !== null ? `/$${share.toFixed(2)}` : ''}${m.hold ? `  대기: ${m.hold === 'budget' ? '예산' : '사용률'}` : ''}`,
+        );
+      }
+      return 0;
+    }
+    case 'show': {
+      const { values, positionals } = parse({ journal: { type: 'string' } });
+      const id = normalizeMissionId(positionals[0]);
+      const { mission: m, body } = readMission(paths, id);
+      const tasks = board.list();
+      const steps = missionSteps(tasks, id);
+      const usage = missionUsage(paths, tasks, now.getTime() - 7 * 86_400_000);
+      const share = missionShare(board.config, listMissions(paths), m);
+      io.out(`${m.id} ${m.title}`);
+      io.out(`상태: ${MISSION_STATUS_LABEL[m.status]}${m.paused_reason && m.status !== 'active' ? ` (${m.paused_reason})` : ''}  가중치: ${m.weight}  기한: ${m.until ?? '-'}`);
+      io.out(`7일 추정 사용량: $${(usage.get(id) ?? 0).toFixed(2)}${share !== null ? ` / 몫 $${share.toFixed(2)}` : ''}${m.hold ? `  대기 중: ${m.hold === 'budget' ? '미션 예산' : '구독 사용률'}` : ''}`);
+      if (m.project || m.workspace) io.out(`프로젝트: ${m.project ?? '-'}  작업공간: ${m.workspace ?? '-'}`);
+      io.out(`파일: ${missionFile(paths, id)}`);
+      io.out('');
+      io.out('## 헌장');
+      io.out('');
+      io.out(charterOf(body));
+      io.out('');
+      io.out('## 단계');
+      io.out('');
+      if (steps.length === 0) io.out('(아직 없음)');
+      for (const s of steps) io.out(`${formatRow(s)}  (하위 ${descendantsOf(tasks, s.id).length}건)`);
+      const journal = readJournal(paths, id).trimEnd();
+      const n = Number(values.journal ?? 4000);
+      io.out('');
+      io.out(`## 진행 기록 (${journalFile(paths, id)})`);
+      io.out('');
+      io.out(journal.length > n ? '…' + journal.slice(-n) : journal || '(없음)');
+      return 0;
+    }
+    case 'pause': {
+      ownerOnly();
+      const { values, positionals } = parse({ reason: { type: 'string' } });
+      const m = pauseMission(paths, normalizeMissionId(positionals[0]), actor, String(values.reason ?? positionals.slice(1).join(' ')), now);
+      io.out(`${m.id} → 일시정지. 새 단계를 만들지 않고, 미션 업무도 새로 시작하지 않습니다.`);
+      return 0;
+    }
+    case 'resume': {
+      ownerOnly();
+      const m = resumeMission(paths, normalizeMissionId(args[0]), actor, now);
+      io.out(`${m.id} → 진행`);
+      return 0;
+    }
+    case 'stop': {
+      ownerOnly();
+      const { values, positionals } = parse({ reason: { type: 'string' }, 'cancel-running': { type: 'boolean' } });
+      const m = stopMission(board, normalizeMissionId(positionals[0]), actor, String(values.reason ?? positionals.slice(1).join(' ')), !!values['cancel-running'], now);
+      io.out(`${m.id} → 중지${values['cancel-running'] ? ' (진행 중 단계 취소)' : ' (진행 중 단계는 끝까지)'}`);
+      return 0;
+    }
+    case 'set': {
+      ownerOnly();
+      const { values, positionals } = parse({ weight: { type: 'string' }, until: { type: 'string' }, title: { type: 'string' } });
+      const m = setMission(paths, normalizeMissionId(positionals[0]), actor, {
+        weight: values.weight === undefined ? undefined : Number(values.weight),
+        until: values.until as string | undefined,
+        title: values.title as string | undefined,
+      }, now);
+      io.out(`${m.id} 설정 변경: 가중치 ${m.weight}, 기한 ${m.until ?? '-'}`);
+      return 0;
+    }
+    case 'charter': {
+      const { values, positionals } = parse({ file: { type: 'string' }, text: { type: 'string' } });
+      const id = normalizeMissionId(positionals[0]);
+      checkCharterActor(board, id, actor, ctx.currentTask);
+      const text = values.file ? fs.readFileSync(path.resolve(String(values.file)), 'utf8') : String(values.text ?? positionals.slice(1).join(' '));
+      setCharter(paths, id, actor, text, now);
+      io.out(`${id} 헌장을 갱신했습니다 (원문은 보존, 변경은 진행 기록에 남음).`);
+      return 0;
+    }
+    case 'achieve':
+    case 'stall': {
+      const { values, positionals } = parse({ summary: { type: 'string' }, reason: { type: 'string' } });
+      const id = normalizeMissionId(positionals[0]);
+      const text = String(values.summary ?? values.reason ?? positionals.slice(1).join(' '));
+      io.out(proposeOrDecide(board, id, actor, ctx.currentTask, sub, text, now));
+      return 0;
+    }
+    default:
+      throw new BoardError('사용법: bf mission create|list|show|pause|resume|stop|set|charter|achieve|stall (bf help 참고)');
+  }
+}
+
 interface TaskCtx {
   board: Board;
   actor: string;
@@ -409,8 +613,10 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
           workspace: { type: 'string' },
           project: { type: 'string' },
           priority: { type: 'string' },
+          'plan-review': { type: 'boolean' },
         },
       });
+      if (values['plan-review']) return planReview(values, ctx);
       if (!values.to) throw new BoardError('담당 직원(--to)이 필요합니다.');
       const task = board.createTask(actor, {
         title: values.title ?? '',
@@ -466,6 +672,8 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
       );
       if (task.depends_on.length) io.out(`선행: ${task.depends_on.join(', ')}`);
       if (task.project || task.workspace) io.out(`프로젝트: ${task.project ?? '-'}  작업공간: ${task.workspace ?? '-'}`);
+      if (task.mission) io.out(`미션: ${task.mission}${task.parent === null ? ' (단계)' : ''}`);
+      if (task.mission_proposal) io.out(`미션 ${task.mission_proposal.kind === 'achieve' ? '달성 제안' : '진전 없음 선언'}: ${task.mission_proposal.text}`);
       if (task.ask_to) io.out(`질문 대상: ${task.ask_to}`);
       const kids = board.children(id);
       if (kids.length) {
@@ -584,7 +792,7 @@ function printInbox(board: Board, io: Io): void {
   const approvals = tasks.filter((t) => t.status === 'blocked' && t.approval);
   const questions = tasks.filter((t) => t.status === 'blocked' && !t.approval && t.ask_to === owner);
   const mine = tasks.filter((t) => board.isOwnerTask(t) && t.status === 'pending');
-  const finished = tasks.filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged);
+  const finished = tasks.filter((t) => t.parent === null && isTerminal(t.status) && !t.acknowledged && !(t.mission && t.status === 'done'));
   if (!approvals.length && !mine.length && !questions.length && !finished.length) {
     io.out('처리할 일이 없습니다.');
     return;

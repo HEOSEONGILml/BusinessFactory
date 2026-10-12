@@ -11,6 +11,8 @@ AI 직원들이 사람 대신 일하는 **범용 업무 시스템**. 업무 내�
 - **사용량 한도**: 구독은 세션/주간 한도가 있고 병렬 실행이 같은 한도를 나눠 쓴다. 약관상 한도는 "일반적인 개인 사용"을 전제로 하므로 동시 실행 수를 낮게 유지한다.
 - **언어**: TypeScript, Node 24의 타입 제거 기능으로 빌드 없이 실행.
 
+> 미션(분기 규모의 방향을 단계 목표로 스스로 진행하는 단위)은 [MISSIONS.md](MISSIONS.md)에 따로 정리했다.
+
 ## 2. 핵심 원칙
 
 1. **상태는 세션이 아니라 파일에 둔다.** 프로세스가 죽거나 PC를 껐다 켜도 이어서 일한다.
@@ -68,7 +70,7 @@ BusinessFactory/              시스템 (이 git 레포)
   - `bf task done` 때 남은 변경을 커밋하고, 기준 브랜치를 합친 뒤 기준 브랜치를 앞으로 당긴다(체크아웃되어 있으면 `merge --ff-only`). 충돌하면 완료 보고를 거부하고 충돌 파일을 알려 주므로, 직원이 같은 실행 안에서 해결하고 다시 보고한다.
   - 업무가 끝나면 엔진이 worktree를 지운다. 반영된 브랜치는 지우고, 실패·취소된 업무의 브랜치는 남긴다.
   - git 저장소가 아니거나 HEAD가 브랜치가 아닌 작업 공간은 예전처럼 한 번에 한 업무만 쓴다.
-- 위임 깊이 제한: 기본 3 (`config.yaml`의 `max_depth`).
+- 위임 깊이: 고정 제한 없음(`config.yaml`의 `max_depth` 기본 `null`). 숫자를 넣으면 그 깊이까지만 위임할 수 있다(하위 호환). 폭주는 업무별 재시도·반려 한도와 미션의 사용량·실패 기반 안전장치가 막는다([MISSIONS.md](MISSIONS.md) 6장).
 - 직원 정의는 Claude Code 하위 에이전트 형식(`company/staff/<name>.md`). 엔진이 실행마다 `--agents` 파일로 넘긴다.
   - `tools`: 쓸 수 있는 도구 종류
   - `permissions`: 업무 폴더 밖의 추가 권한 규칙 (예: `Bash(npm:*)`, `WebSearch`)
@@ -103,6 +105,8 @@ board/T0012/
 | attempts / max_attempts | 실행 시도 횟수 / 상한 |
 | rejections / max_rejections | 반려 횟수 / 상한 |
 | ask_to | 질문 대기 시 답할 대상 |
+| mission | 소속 미션 id (선택. 단계는 엔진이 넣고 하위 업무는 상속) |
+| mission_proposal | 미션 단계의 달성/진전 없음 제안 (선택, 검수 통과 시 적용) |
 | created_at, updated_at | 시각 |
 
 ### 상태
@@ -162,11 +166,14 @@ awaiting_approval ──승인──▶ pending ──▶ running ──done─�
 | `bf approval request <id> "<내용>" --need "<규칙>"` | 결재 요청 (직원) |
 | `bf hire propose <id> <채용안.md>` / `bf hire list` | 채용 제출 (hr) / 대기 채용안 |
 | `bf memory list` / `show <주제>` / `add <주제> "<내용>"` | 회사 기억 |
+| `bf mission create/list/show/pause/resume/stop/set/charter/achieve/stall` | 미션 ([MISSIONS.md](MISSIONS.md) 9장) |
+| `bf task create --plan-review` | 지금 업무의 `output/plan.md` 비판 검토를 reviewer에게 맡김 |
 
 ### bf가 강제하는 규칙
 
 - 완료 조건 없는 업무는 생성 불가
-- 위임 깊이 초과 불가
+- 위임 깊이 초과 불가 (`max_depth`를 숫자로 정한 경우만)
+- 미션 단계(최상위)의 일반 질문 불가 (`--owner` 질문, 사용자 업무는 가능)
 - 존재하지 않는 직원에게 배정 불가
 - 남의 업무를 완료/질문 처리 불가
 - 하위 업무가 진행 중인 업무는 완료 보고 불가
@@ -180,9 +187,10 @@ awaiting_approval ──승인──▶ pending ──▶ running ──done─�
 
 1. 사용량 한도 대기 중이면 리셋 시각까지 쉰다.
 2. 정기 업무 중 시각이 된 것을 목표로 등록한다.
+   - 미션 루프: 끝난 단계를 진행 기록에 남기고 안전장치를 검사한 뒤, 다음 단계 목표를 만든다. 정기·사건 보고를 보낸다([MISSIONS.md](MISSIONS.md) 3·6·8장).
 3. 실행할 업무를 고른다.
    - 검수 대기 업무가 먼저다.
-   - 그다음 실행 가능한 업무를 우선순위(업무 + 프로젝트) 순으로 고른다.
+   - 그다음 실행 가능한 업무를 우선순위(업무 + 프로젝트) 순으로 고른다. 미션 업무는 사용자 목표 뒤에, 미션별 7일 사용량/가중치가 적은 순으로, 미션 자리 상한(`missions.max_slots`) 안에서만 고른다. 일시정지·예산 초과·구독 상한에 걸린 미션의 업무는 고르지 않는다.
    - 동시 실행 상한과 작업 공간당 1명 규칙(worktree 를 쓰는 작업 공간은 제외) 안에서 빈 자리만큼 실행한다.
 4. 끝난 실행을 처리한다.
    - 직원이 `bf`로 상태를 바꿨으면 그대로 둔다.

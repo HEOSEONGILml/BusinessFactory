@@ -140,6 +140,25 @@ describe('웹 화면', () => {
     assert.deepEqual(d.prereqFiles.map((f: { path: string }) => f.path), got);
   });
 
+  it('미션 탭: 등록·목록·일시정지·재개·중지', async () => {
+    const r = await post('/api/mission', { title: '웹 미션', brief: '성공 기준: X', until: '2026-12-31' });
+    assert.equal(r.status, 200);
+    const { id } = await r.json();
+    assert.equal((await post(`/api/mission/${id}/pause`, { reason: '잠깐' })).status, 200);
+    let list = (await (await fetch(BASE + '/api/missions')).json()).missions;
+    let m = list.find((x: { id: string }) => x.id === id);
+    assert.equal(m.status, 'paused');
+    assert.equal(m.charter, '성공 기준: X');
+    assert.match(m.journal, /일시정지 \(owner\)/);
+    assert.equal((await post(`/api/mission/${id}/resume`, {})).status, 200);
+    assert.equal((await post(`/api/mission/${id}/stop`, { cancelRunning: true })).status, 200);
+    list = (await (await fetch(BASE + '/api/missions')).json()).missions;
+    m = list.find((x: { id: string }) => x.id === id);
+    assert.equal(m.status, 'stopped');
+    assert.equal((await post(`/api/mission/${id}/resume`, {})).status, 400);
+    assert.equal((await post('/api/mission', { title: '몰래' }, 'wrong')).status, 403);
+  });
+
   it('규칙 위반은 이유와 함께 400', async () => {
     const r = await post('/api/task/T0001/deny', { reason: '' });
     assert.equal(r.status, 400);
