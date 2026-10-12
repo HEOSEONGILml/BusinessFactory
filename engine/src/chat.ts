@@ -107,13 +107,63 @@ export function projectOf(task: { project: string | null; workspace?: string | n
   return task.project ?? task.workspace ?? null;
 }
 
-/** The project's channel (#blindcandle); null when the name cannot be a channel name. */
-export function ensureProjectChannel(paths: Paths, name: string): Conversation | null {
+/**
+ * The project's channel (#blindcandle); null when the name cannot be a channel name.
+ * A channel made now opens with a one-line introduction (what the project is, which mission).
+ */
+export function ensureProjectChannel(paths: Paths, name: string, about: { mission?: string | null } = {}): Conversation | null {
+  let conv: Conversation;
+  let created: boolean;
   try {
-    return ensureChannel(paths, name, name);
+    const id = `c-${name.replace(/^#/, '').trim().toLowerCase()}`;
+    created = !fs.existsSync(convFile(paths, id, 'json'));
+    conv = ensureChannel(paths, name, name);
   } catch {
     return null;
   }
+  if (created) {
+    try {
+      postMessage(paths, conv.id, 'ceo', projectIntro(paths, name, about.mission ?? null), { chain: 99, kind: 'system' });
+    } catch {
+      // the channel matters more than its introduction
+    }
+  }
+  return conv;
+}
+
+/**
+ * The project's one-line description: the first line of its workspace README (the heading without
+ * the leading "name —", or the first paragraph line when the heading is just the name). Null if none.
+ */
+export function projectDescription(paths: Paths, name: string): string | null {
+  const readme = path.join(paths.workspaces, name, 'README.md');
+  if (!fs.existsSync(readme)) return null;
+  const lines = fs.readFileSync(readme, 'utf8').split('\n').map((l) => l.trim());
+  const clean = (l: string) => l.replace(/[*_`]/g, '').trim();
+  const heading = lines.find((l) => /^#\s/.test(l));
+  if (heading) {
+    const m = clean(heading.replace(/^#+\s*/, '')).match(/^[^—–:|-]*?\s+[—–:|-]\s+(.+)$/);
+    if (m) return cut(m[1], 200);
+  }
+  const para = lines.find((l) => l && !/^(#|[-*>|]|```|<|!\[)/.test(l));
+  return para ? cut(clean(para), 200) : heading ? cut(clean(heading.replace(/^#+\s*/, '')), 200) : null;
+}
+
+/** First message of a project channel: what the channel is for, the service in one line, its mission. */
+export function projectIntro(paths: Paths, name: string, missionId: string | null): string {
+  const title = `#${name.toLowerCase()}`;
+  const desc = projectDescription(paths, name) ?? `작업 공간 ${name} 의 프로젝트`;
+  let mission = '미션 소속 없음';
+  if (missionId) {
+    let mt = `#${missionId.toLowerCase()}`;
+    try {
+      mt = getConv(paths, `c-${missionId.toLowerCase()}`).title;
+    } catch {
+      // mission channel not made yet: its plain name will do
+    }
+    mission = `미션 ${missionId} 소속 (${mt})`;
+  }
+  return `📌 **${title}** 프로젝트 채널 — ${desc} · ${mission} · 업무별 완료 보고와 진행 상황을 이곳에 공유합니다.`;
 }
 
 /**
@@ -121,7 +171,7 @@ export function ensureProjectChannel(paths: Paths, name: string): Conversation |
  * that the project's details live there. Returns true when the announcement was posted now.
  */
 export function linkProjectToMission(paths: Paths, project: string, missionId: string): boolean {
-  const conv = ensureProjectChannel(paths, project);
+  const conv = ensureProjectChannel(paths, project, { mission: missionId });
   if (!conv) return false;
   const missions = conv.missions ?? [];
   if (missions.includes(missionId)) return false;
@@ -143,7 +193,7 @@ export function linkProjectToMission(paths: Paths, project: string, missionId: s
 export function channelForTask(paths: Paths, task: { mission?: string | null; project: string | null; workspace?: string | null }): Conversation {
   const project = projectOf(task);
   if (project) {
-    const conv = ensureProjectChannel(paths, project);
+    const conv = ensureProjectChannel(paths, project, { mission: task.mission ?? null });
     if (conv) return conv;
   }
   if (task.mission) return ensureMissionChannel(paths, task.mission);

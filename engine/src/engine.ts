@@ -29,7 +29,8 @@ import {
 } from './chat.ts';
 import type { Conversation, DueReply } from './chat.ts';
 import { dueSchedules } from './schedule.ts';
-import { charterOf, journalFile, missionExists, missionFile, MissionLoop, readMission } from './missions.ts';
+import { charterOf, journalFile, listMissions, missionExists, missionFile, MissionLoop, readMission } from './missions.ts';
+import { createPrivateRemote, hasCommits, initWorkspaceRepo, isRepo } from './remote.ts';
 import { WINDOW_LABEL } from './stream.ts';
 import { ensureWorktree, removeWorktree, usesWorktrees } from './worktree.ts';
 import type { RunEvent, UsageSnapshot } from './stream.ts';
@@ -210,6 +211,7 @@ export class Engine {
     this.reportOrigins();
     this.announceWork();
     this.cleanWorktrees();
+    this.ensureWorkspaceRemotes();
     if (!this.enabled) return;
     this.fireSchedules();
     try {
@@ -296,6 +298,43 @@ export class Engine {
         this.log(`${t.id} worktree 정리 (${t.worktree.branch}${t.status === 'done' ? ', 병합됨' : ', 브랜치는 보관'})`);
       } catch (e) {
         this.log(`${t.id} worktree 정리 실패: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  /** Workspace name → when to look at it again for a missing remote (Infinity: done or gave up). */
+  private remoteChecks = new Map<string, number>();
+
+  /**
+   * workspace_remote: every workspace repo without origin gets a private GitHub repo and its branch
+   * pushed (once per workspace per process; a failure is logged and warned about in the project
+   * channel, never retried in a loop). Folders that are not repos are left alone; a repo with no
+   * commit yet is looked at again later.
+   */
+  private ensureWorkspaceRemotes(): void {
+    const cfg = this.config.workspace_remote;
+    if (!cfg?.enabled || !fs.existsSync(this.paths.workspaces)) return;
+    const now = Date.now();
+    for (const d of fs.readdirSync(this.paths.workspaces, { withFileTypes: true })) {
+      if (!d.isDirectory() || d.name.startsWith('.')) continue;
+      if ((this.remoteChecks.get(d.name) ?? 0) > now) continue;
+      const dir = path.join(this.paths.workspaces, d.name);
+      if (!isRepo(dir) || !hasCommits(dir)) {
+        this.remoteChecks.set(d.name, now + 10 * 60_000);
+        continue;
+      }
+      this.remoteChecks.set(d.name, Infinity);
+      try {
+        const r = createPrivateRemote(dir, d.name, cfg);
+        if (!r) continue;
+        this.log(`작업 공간 ${d.name}: ${r.message}`);
+        const conv = ensureProjectChannel(this.paths, d.name);
+        if (conv) {
+          const text = r.ok ? `🔗 ${r.message}. 이 작업 공간의 작업은 업무 병합 때마다 이 원격에 push 됩니다.` : `⚠️ 작업 공간 ${d.name} 원격 저장소 자동 생성 실패 — ${r.message}`;
+          postMessage(this.paths, conv.id, 'ceo', text, { chain: 99, kind: 'system' });
+        }
+      } catch (e) {
+        this.log(`작업 공간 ${d.name} 원격 저장소 처리 오류: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   }
@@ -416,14 +455,22 @@ export class Engine {
         if (d.isDirectory() && !d.name.startsWith('.')) names.add(d.name);
       }
     }
+    // The mission each project serves, for the channel's introduction.
+    const missionOf = new Map<string, string>();
     for (const t of this.board.list()) {
       const p = projectOf(t);
       if (p) names.add(p);
+      if (p && t.mission && !missionOf.has(p)) missionOf.set(p, t.mission);
+    }
+    try {
+      for (const m of listMissions(this.paths)) if (m.project && !missionOf.has(m.project)) missionOf.set(m.project, m.id);
+    } catch {
+      // missions are optional here
     }
     for (const name of names) {
       if (this.knownProjects.has(name)) continue;
       try {
-        ensureProjectChannel(this.paths, name);
+        ensureProjectChannel(this.paths, name, { mission: missionOf.get(name) ?? null });
       } catch {
         // best-effort
       }
@@ -1062,7 +1109,18 @@ export class Engine {
 
   private buildSpec(task: Task, kind: RunKind, agent: AgentInfo): RunSpec {
     const taskDir = this.board.taskDir(task.id);
-    if (task.workspace) fs.mkdirSync(path.join(this.paths.workspaces, task.workspace), { recursive: true });
+    if (task.workspace) {
+      const dir = path.join(this.paths.workspaces, task.workspace);
+      if (!fs.existsSync(dir) && this.config.workspace_remote?.enabled) {
+        // A new workspace is its own git repo from the start; ensureWorkspaceRemotes gives it a private remote.
+        const r = initWorkspaceRepo(dir, task.workspace);
+        this.log(`작업 공간 ${task.workspace} 새로 만듦: ${r.message}`);
+        ensureProjectChannel(this.paths, task.workspace, { mission: task.mission ?? null });
+        this.remoteChecks.delete(task.workspace);
+        this.ensureWorkspaceRemotes();
+      }
+      fs.mkdirSync(dir, { recursive: true });
+    }
     const workspaceDir = this.workDir(task, kind);
 
     // Employees change only their own task folder and workspace; reviewers change nothing.

@@ -70,6 +70,11 @@ BusinessFactory/              시스템 (이 git 레포)
   - `bf task done` 때 남은 변경을 커밋하고, 기준 브랜치를 합친 뒤 기준 브랜치를 앞으로 당긴다(체크아웃되어 있으면 `merge --ff-only`). 충돌하면 완료 보고를 거부하고 충돌 파일을 알려 주므로, 직원이 같은 실행 안에서 해결하고 다시 보고한다.
   - 업무가 끝나면 엔진이 worktree를 지운다. 반영된 브랜치는 지우고, 실패·취소된 업무의 브랜치는 남긴다.
   - git 저장소가 아니거나 HEAD가 브랜치가 아닌 작업 공간은 예전처럼 한 번에 한 업무만 쓴다.
+- **작업 공간 원격 저장소** (`workspace_remote`, `engine/src/remote.ts`): 작업 공간은 각각 독립 git 저장소이고 비공개 GitHub 원격(origin)을 가지며, 작업은 항상 push한다. 서버 디스크를 잃어도 코드가 남게 하려는 규칙이다.
+  - 설정: `workspace_remote: { enabled, owner, gh_command }`. 기본값은 꺼짐(`enabled: false`, 로그인된 `gh` 필요). `owner`가 null이면 gh 로그인 계정에 만든다. 옛 config.yaml(항목 없음)은 기본값으로 읽는다.
+  - 새 작업 공간: 엔진이 업무 실행 때 작업 공간 폴더를 처음 만들면 `git init -b main` + README·`.gitignore`(.env, node_modules 제외) 첫 커밋을 한다.
+  - 원격 생성: 매 tick, origin이 없고 커밋이 있는 작업 공간 저장소에 `gh repo create <owner>/<이름> --private --source <작업공간> --remote origin --push`를 실행한다. 프로세스당 작업 공간마다 한 번만 시도하고(실패도 반복하지 않음), 결과를 엔진 로그와 프로젝트 채널에 남긴다. git 저장소가 아닌 폴더는 건드리지 않는다.
+  - 병합 후 push: `bf task done`이 worktree를 기준 브랜치에 합친 뒤(worktree가 없으면 체크아웃된 브랜치) origin에 push한다. `gh repo view`로 origin이 PRIVATE인지 먼저 확인하고, 공개이거나 확인하지 못하면 push하지 않는다. push 실패는 완료 보고를 막지 않고, 업무 이력(`[engine] 코멘트`)과 프로젝트 채널에 경고로 남긴다.
 - 위임 깊이: 고정 제한 없음(`config.yaml`의 `max_depth` 기본 `null`). 숫자를 넣으면 그 깊이까지만 위임할 수 있다(하위 호환). 폭주는 업무별 재시도·반려 한도와 미션의 사용량·실패 기반 안전장치가 막는다([MISSIONS.md](MISSIONS.md) 6장).
 - 직원 정의는 Claude Code 하위 에이전트 형식(`company/staff/<name>.md`). 엔진이 실행마다 `--agents` 파일로 넘긴다.
   - `tools`: 쓸 수 있는 도구 종류
@@ -272,6 +277,7 @@ claude -p --agents <정의.json> --agent <직원> --output-format json
 
 - 저장: `company/chat/<id>.json`(메타) + `<id>.jsonl`(메시지). 채널 `c-이름`, DM `d-a--b`, 회의 `m-시각-난수`. 회의록은 `company/meetings/<id>.md`.
 - 채널: `#general` 과 프로젝트마다 하나. DM: 사용자↔직원, 직원↔직원.
+- 프로젝트 채널이 새로 생기면 첫 메시지로 한 줄 소개를 올린다: `📌 **#이름** 프로젝트 채널 — <서비스 한 줄 설명> · 미션 M001 소속 (#m001 · 제목) · …`. 설명은 작업 공간 `README.md` 첫 제목의 `이름 —` 뒤(없으면 첫 문단 줄), 미션은 그 프로젝트·작업 공간을 쓰는 업무나 미션의 `project`에서 찾는다. 이미 있는 채널에는 다시 올리지 않는다.
 - 답장: DM 상대, 또는 채널에서 `@이름`으로 불린 직원을 엔진이 짧은 대화용 실행으로 깨운다. 최종 출력이 곧 메시지다. 직원별 커서(`.cursors.json`)로 같은 메시지에 두 번 답하지 않는다.
 - 연쇄 제한: 사용자 메시지는 chain 0, 직원 답장은 +1. `chat.max_chain`(기본 3)에 닿은 메시지는 더 이상 답장을 부르지 않는다. 직원끼리 끝없이 대화하는 것을 막기 위해서다.
 - 대화용 실행: 쓰기 권한이 없고, 셸은 bf 뿐이며, 작업 공간(비밀값)을 읽을 수 없다. 업무 실행과 별도로 `chat.max_concurrency`(기본 2)만큼 돈다. 사용량 상한과 한도 대기는 똑같이 적용된다.

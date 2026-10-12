@@ -75,7 +75,24 @@ export interface Config {
   autonomy: boolean;
   /** Missions: quarter-sized directions the company pursues step by step on its own (docs/MISSIONS.md). */
   missions: MissionsConfig;
+  /** Every workspace gets a private GitHub remote and its work is pushed there (engine/src/remote.ts). */
+  workspace_remote: WorkspaceRemoteConfig;
 }
+
+export interface WorkspaceRemoteConfig {
+  /**
+   * On: the engine makes a new workspace a git repo, creates a PRIVATE GitHub repo (gh) for every
+   * workspace repo without origin and pushes it, and `bf task done` pushes the merged base branch.
+   * Pushes only go to remotes gh reports as private. Off by default (needs a logged-in gh).
+   */
+  enabled: boolean;
+  /** GitHub account or organisation for new repos (<owner>/<workspace>); null = the gh account. */
+  owner: string | null;
+  /** Command that runs the GitHub CLI; extra elements are leading arguments. */
+  gh_command: string[];
+}
+
+export const DEFAULT_WORKSPACE_REMOTE: WorkspaceRemoteConfig = { enabled: false, owner: null, gh_command: ['gh'] };
 
 export interface MissionsConfig {
   /**
@@ -138,6 +155,7 @@ export const DEFAULT_CONFIG: Config = {
   watchdog: { auto_resume_minutes: 10, stale_seconds: 120 },
   autonomy: false,
   missions: DEFAULT_MISSIONS,
+  workspace_remote: DEFAULT_WORKSPACE_REMOTE,
 };
 
 export function loadConfig(paths: Paths): Config {
@@ -149,5 +167,6 @@ export function loadConfig(paths: Paths): Config {
     chat: { ...DEFAULT_CONFIG.chat, ...(raw.chat ?? {}) },
     watchdog: { ...DEFAULT_CONFIG.watchdog, ...(raw.watchdog ?? {}) },
     missions: { ...DEFAULT_MISSIONS, ...(raw.missions ?? {}) },
+    workspace_remote: { ...DEFAULT_WORKSPACE_REMOTE, ...(raw.workspace_remote ?? {}) },
   };
 }

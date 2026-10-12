@@ -35,6 +35,7 @@ import {
 import { getConv, lastOwnerMessage, listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
+import { pushAfterDone } from './remote.ts';
 import { integrateWorktree } from './worktree.ts';
 import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
 import { startWeb, statusLabel } from './web.ts';
@@ -726,6 +727,8 @@ function runTask(sub: string | undefined, args: string[], ctx: TaskCtx): number 
       const merged = before.worktree && !before.worktree.removed && actor === before.assignee ? integrateWorktree(board.paths, before) : null;
       const task = board.done(actor, id, values.summary ?? '');
       if (merged) io.out(merged);
+      const pushed = pushAfterDone(board, before);
+      if (pushed) io.out(pushed);
       io.out(`${task.id} → ${STATUS_LABEL[task.status]}`);
       return 0;
     }
