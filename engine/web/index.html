@@ -897,9 +897,15 @@ function renderSide() {
   $('#memory').innerHTML = state.memory.map((m) => `<div class="item"><b>${esc(m.title)}</b> <span class="d">· ${m.entries}건</span></div>`).join('') || '<div class="d">아직 없습니다</div>';
   const r = state.runs;
   $('#runs').innerHTML = r.total ? `<div class="item"><b>합계 ${r.total}회</b></div>` + Object.entries(r.byAgent).map(([k, v]) => `<div class="item">${esc(k)} <span class="d">· ${v}회</span></div>`).join('') : '<div class="d">아직 없습니다</div>';
-  const ws = $('#goalWorkspace'), cur = ws.value;
-  ws.innerHTML = '<option value="">없음</option>' + state.workspaces.map((w) => `<option${w === cur ? ' selected' : ''}>${esc(w)}</option>`).join('');
-  $('#projects').innerHTML = [...new Set(state.tasks.map((t) => t.project).filter(Boolean))].map((p) => `<option value="${esc(p)}">`).join('');
+  // 목록이 실제로 바뀔 때만 다시 그린다. 매 5초 다시 그리면 펼쳐 둔 선택 상자·자동완성이 닫힌다.
+  const ws = $('#goalWorkspace'), wsKey = state.workspaces.join('\n');
+  if (ws.dataset.key !== wsKey) {
+    const cur = ws.value;
+    ws.innerHTML = '<option value="">없음</option>' + state.workspaces.map((w) => `<option${w === cur ? ' selected' : ''}>${esc(w)}</option>`).join('');
+    ws.dataset.key = wsKey;
+  }
+  const pj = $('#projects'), pjHtml = [...new Set(state.tasks.map((t) => t.project).filter(Boolean))].map((p) => `<option value="${esc(p)}">`).join('');
+  if (pj.dataset.html !== pjHtml) { pj.innerHTML = pjHtml; pj.dataset.html = pjHtml; }
 }
 
 /* ---------- task detail ---------- */
@@ -1232,7 +1238,7 @@ $('#convList').addEventListener('click', async (ev) => {
   try { const r = await api('/api/chat/dm', { agent: el.dataset.dm }); await loadChat(); openConv(r.id); } catch (e) { toast(e.message, true); }
 });
 
-async function openConv(id, keepScroll) {
+async function openConv(id, keepScroll, stick) {
   try { convData = await api(`/api/chat/${id}`); } catch (e) { return toast(e.message, true); }
   const switching = currentConv !== id;
   currentConv = id;
@@ -1267,29 +1273,43 @@ async function openConv(id, keepScroll) {
     : meeting && conv.status === 'open' ? '발언이 끝났습니다. 의견을 더 주시거나, @이름 으로 지명하거나, 전원 한 바퀴 더 돌리거나, 회의를 마치세요.'
     : conv.kind === 'channel' ? '@이름 으로 부르면 그 직원이 답합니다. 예: @ceo 이번 주 진행 상황 알려줘' : '';
   const placeholder = meeting ? (conv.status === 'open' ? '회의에 의견을 남기세요. 특정 직원에게만 물으려면 @이름 (Enter 전송, Shift+Enter 줄바꿈)' : '끝난 회의입니다') : '메시지 (Enter 전송, Shift+Enter 줄바꿈)';
-  const msgsEl = document.querySelector('#chatMain .msgs');
-  const nearBottom = !msgsEl || msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
-  const prevTop = msgsEl ? msgsEl.scrollTop : 0;
-  const draft = document.querySelector('#chatMain textarea')?.value ?? '';
-  $('#chatMain').innerHTML = `
-    <div class="chat-head"><h3>${esc(title)}</h3><div class="people">${chips}</div><span style="flex:1"></span>${actions}
-      ${meeting ? `<div class="agenda">안건: ${esc(conv.agenda)} · 진행 ${esc(conv.facilitator)}</div>` : ''}</div>
-    <div class="msgs">${body || '<div class="chat-empty">아직 메시지가 없습니다</div>'}</div>
-    <div class="typing">${typing}</div>
-    <div class="chat-compose">${meeting && conv.status !== 'open' ? '' : attachUI(`c:${id}`)}<textarea placeholder="${esc(placeholder)}" ${meeting && conv.status !== 'open' ? 'disabled' : ''}></textarea>
-      <button class="btn primary" id="sendBtn" ${meeting && conv.status !== 'open' ? 'disabled' : ''}>보내기</button></div>`;
-  const ta = document.querySelector('#chatMain textarea');
-  if (!switching) ta.value = draft;
-  const box = document.querySelector('#chatMain .msgs');
-  // 다시 그려도 읽던 위치를 유지한다. 맨 아래를 보고 있었을 때만 새 메시지를 따라 내려간다.
-  box.scrollTop = (switching || nearBottom || !keepScroll) ? box.scrollHeight : prevTop;
-  const send = async () => {
-    if (uploading(`c:${id}`)) return toast('이미지를 올리는 중입니다', true);
-    const text = withAttachments(ta.value.trim(), `c:${id}`); if (!text) return;
-    try { await api(`/api/chat/${id}/post`, { text }); ta.value = ''; clearAttachments(`c:${id}`); await openConv(id); loadChatList(); } catch (e) { toast(e.message, true); }
-  };
-  $('#sendBtn').onclick = send;
-  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+  const closed = meeting && conv.status !== 'open';
+  const headHtml = `<h3>${esc(title)}</h3><div class="people">${chips}</div><span style="flex:1"></span>${actions}
+      ${meeting ? `<div class="agenda">안건: ${esc(conv.agenda)} · 진행 ${esc(conv.facilitator)}</div>` : ''}`;
+  const msgsHtml = body || '<div class="chat-empty">아직 메시지가 없습니다</div>';
+  const main = $('#chatMain');
+  const shellKey = `${id}|${closed ? 'closed' : 'open'}`;
+  // 같은 대화를 다시 그릴 때는 입력창(글자·커서·한글 조합·첨부)을 절대 다시 만들지 않는다.
+  // 머리글·메시지·작성 중 표시만, 실제로 바뀐 부분만 갈아 끼운다.
+  if (main.dataset.shell !== shellKey) {
+    main.innerHTML = `
+    <div class="chat-head"></div>
+    <div class="msgs"></div>
+    <div class="typing"></div>
+    <div class="chat-compose">${closed ? '' : attachUI(`c:${id}`)}<textarea placeholder="${esc(placeholder)}" ${closed ? 'disabled' : ''}></textarea>
+      <button class="btn primary" id="sendBtn" ${closed ? 'disabled' : ''}>보내기</button></div>`;
+    main.dataset.shell = shellKey;
+    const ta = main.querySelector('textarea');
+    const send = async () => {
+      if (uploading(`c:${id}`)) return toast('이미지를 올리는 중입니다', true);
+      const text = withAttachments(ta.value.trim(), `c:${id}`); if (!text) return;
+      try { await api(`/api/chat/${id}/post`, { text }); ta.value = ''; clearAttachments(`c:${id}`); await openConv(id, false, true); loadChatList(); } catch (e) { toast(e.message, true); }
+    };
+    $('#sendBtn').onclick = send;
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+  }
+  const head = main.querySelector('.chat-head');
+  if (head.dataset.html !== headHtml) { head.innerHTML = headHtml; head.dataset.html = headHtml; }
+  const typingEl = main.querySelector('.typing');
+  if (typingEl.dataset.html !== typing) { typingEl.innerHTML = typing; typingEl.dataset.html = typing; }
+  const box = main.querySelector('.msgs');
+  if (box.dataset.html !== msgsHtml) {
+    // 맨 아래를 보고 있었거나 대화를 막 열었거나 내가 보냈을 때만 새 메시지를 따라 내려간다. 아니면 읽던 위치 그대로.
+    const nearBottom = !box.dataset.html || box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+    const prevTop = box.scrollTop;
+    box.innerHTML = msgsHtml; box.dataset.html = msgsHtml;
+    box.scrollTop = (switching || nearBottom || !keepScroll || stick) ? box.scrollHeight : prevTop;
+  }
   if ($('#mRound')) $('#mRound').onclick = async () => { try { await api(`/api/meeting/${id}/round`, {}); toast('한 바퀴 더 돌립니다'); openConv(id); } catch (e) { toast(e.message, true); } };
   if ($('#mEnd')) $('#mEnd').onclick = async () => { if (!confirm('회의를 마치고 회의록을 작성할까요?')) return; try { await api(`/api/meeting/${id}/end`, {}); toast('진행자가 회의록을 작성합니다'); openConv(id); } catch (e) { toast(e.message, true); } };
   if ($('#mGoal')) $('#mGoal').onclick = () => {
