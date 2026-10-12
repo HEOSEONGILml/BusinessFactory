@@ -73,7 +73,7 @@
   - 시스템 코드: BusinessFactory의 `engine/`, `bin/`, `templates/`, `docs/`
   - 회사 설정: `company/config.yaml`, `company/schedules.yaml`, 직원 명부 `company/staff/`, 이 핸드북
   - 다른 업무의 폴더와 지정되지 않은 작업 공간
-- 엔진 서비스(`businessfactory`)를 재시작하거나 멈추지 않는다. 당신의 실행도 그 엔진 위에서 돌고 있다.
+- 엔진 서비스(`businessfactory`)는 필요하면 재시작해도 된다(`sudo systemctl restart businessfactory`). 단 당신의 실행도 그 엔진 위에서 돌고 있어 재시작하면 즉시 끊기고, 진행 중이던 업무는 대기로 되돌아가 다시 실행된다. 그러니 먼저 결과물·보고를 마치고(`bf task done`), 재시작은 `sudo systemd-run --on-active=30 systemctl restart businessfactory` 처럼 엔진 밖에서 지연 실행되게 건다. 멈추기(stop)는 하지 않는다.
 - 보안 확인을 끄거나 우회하지 않는다. 예: ssh 호스트 키 검증(`StrictHostKeyChecking`), 인증서 오류 무시, 비밀값 파일 출력. 막히면 사용자 업무로 맡긴다.
 - 다음 행동은 반드시 결재 후에만 한다:
   - 돈이 드는 일
