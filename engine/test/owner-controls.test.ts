@@ -213,3 +213,33 @@ describe('엔진 감시', () => {
     assert.match(halted.out, /정지 \(인증 오류\)/);
   });
 });
+
+describe('자율 운영 (autonomy)', () => {
+  it('결재 요청은 기록되고 바로 승인되며, 업무는 계속 진행한다', () => {
+    const { board } = makeBoard({ autonomy: true });
+    const g = board.createTask('owner', { title: '배포', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null });
+    board.start(g.id);
+    const t = board.requestApproval('ceo', g.id, 'push·배포', ['Bash(git push:*)']);
+    assert.equal(t.status, 'running');
+    assert.equal(t.approval ?? null, null);
+    assert.deepEqual(t.grants, ['Bash(git push:*)']);
+    assert.match(board.readLog(g.id), /결재요청[\s\S]*결재승인[\s\S]*자동 승인/);
+    assert.equal(ownerItems(board).length, 0);
+  });
+
+  it('설정이 꺼져 있으면 예전처럼 사용자 결재를 기다린다', () => {
+    const { board } = makeBoard();
+    const g = board.createTask('owner', { title: '배포', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null });
+    board.start(g.id);
+    assert.equal(board.requestApproval('ceo', g.id, 'push·배포', []).status, 'blocked');
+  });
+
+  it('ceo가 미션을 등록할 수 있다 (꺼져 있으면 거부)', () => {
+    const root = makeRoot();
+    const io = { out: () => {}, err: () => {} };
+    assert.equal(main(['mission', 'create', '운영', '--brief', '헌장'], { BF_ROOT: root, BF_ACTOR: 'ceo' }, io), 1);
+    fs.writeFileSync(path.join(root, 'company', 'config.yaml'), 'autonomy: true\n');
+    assert.equal(main(['mission', 'create', '운영', '--brief', '헌장'], { BF_ROOT: root, BF_ACTOR: 'ceo' }, io), 0);
+    assert.equal(main(['mission', 'create', '운영2', '--brief', '헌장'], { BF_ROOT: root, BF_ACTOR: 'worker' }, io), 1);
+  });
+});

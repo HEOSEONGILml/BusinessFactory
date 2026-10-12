@@ -241,7 +241,8 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
       });
       const [id, ...text] = positionals;
       const task = board.requestApproval(actor, requireId([id]), text.join(' '), values.need ?? []);
-      io.out(`${task.id} → 결재 대기. 지금 실행을 마치세요; 결정이 나면 다시 시작됩니다.`);
+      if (task.status === 'running') io.out(`${task.id} → 자율 운영 설정으로 자동 승인되었습니다. 이어서 진행하세요.`);
+      else io.out(`${task.id} → 결재 대기. 지금 실행을 마치세요; 결정이 나면 다시 시작됩니다.`);
       return 0;
     }
 
@@ -266,7 +267,11 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
       }
       if (before.status !== 'running') throw new BoardError(`${taskId} 는 진행 중이 아닙니다.`);
       const proposals = stageProposals(paths, files.map((f) => path.resolve(f)));
-      const task = board.requestHire(actor, taskId, proposals.map((p) => p.name));
+      const task = board.requestHire(actor, taskId, proposals.map((p) => p.name), (names) => installHires(paths, names));
+      if (task.status === 'running') {
+        io.out(`${task.id} → 자율 운영 설정으로 채용 자동 승인 (${proposals.map((p) => p.name).join(', ')}). 이어서 진행하세요.`);
+        return 0;
+      }
       io.out(`${task.id} → 채용 결재 대기 (${proposals.map((p) => p.name).join(', ')}). 지금 실행을 마치세요.`);
       return 0;
     }
@@ -459,7 +464,8 @@ function runMission(sub: string | undefined, args: string[], ctx: TaskCtx): numb
   const owner = board.config.owner;
   const now = new Date();
   const ownerOnly = () => {
-    if (actor !== owner) throw new BoardError('이 명령은 사용자만 쓸 수 있습니다.');
+    if (actor === owner || (board.config.autonomy && actor === board.config.ceo)) return;
+    throw new BoardError(`이 명령은 사용자만 쓸 수 있습니다.${actor === board.config.ceo ? ' (company/config.yaml 의 autonomy: true 면 ceo도 쓸 수 있습니다)' : ''}`);
   };
   const parse = (options: Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>) =>
     parseArgs({ args, allowPositionals: true, options });

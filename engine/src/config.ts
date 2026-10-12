@@ -68,6 +68,11 @@ export interface Config {
    * reports the engine as hung when its heartbeat is older than this.
    */
   watchdog: { auto_resume_minutes: number; stale_seconds: number };
+  /**
+   * The owner delegated their decisions: approval requests (actions and hires) are approved on the
+   * spot and recorded, and the ceo may run the owner's mission commands (create, pause, resume, stop, set).
+   */
+  autonomy: boolean;
   /** Missions: quarter-sized directions the company pursues step by step on its own (docs/MISSIONS.md). */
   missions: MissionsConfig;
 }
@@ -131,6 +136,7 @@ export const DEFAULT_CONFIG: Config = {
   full_access: false,
   worktrees: false,
   watchdog: { auto_resume_minutes: 10, stale_seconds: 120 },
+  autonomy: false,
   missions: DEFAULT_MISSIONS,
 };
 

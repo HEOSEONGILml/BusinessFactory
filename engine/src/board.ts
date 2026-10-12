@@ -506,17 +506,24 @@ export class Board {
       this.requireStatus(doc.task, 'running');
       if (!what.trim()) throw new BoardError('결재 내용이 비어 있습니다.');
       grants.forEach(checkGrantRule);
-      return this.blockOnOwner(doc, actor, { kind: 'action', what, grants, hires: [] });
+      const approval: Approval = { kind: 'action', what, grants, hires: [] };
+      if (this.config.autonomy) return this.autoApprove(doc, actor, approval);
+      return this.blockOnOwner(doc, actor, approval);
     });
   }
 
   /** HR puts proposed employee definitions (already validated and copied to hiring/) up for approval. */
-  requestHire(actor: string, id: string, names: string[]): Task {
+  requestHire(actor: string, id: string, names: string[], install?: (names: string[]) => void): Task {
     return this.locked(() => {
       const doc = this.read(id);
       this.requireAssignee(actor, doc.task);
       this.requireStatus(doc.task, 'running');
-      return this.blockOnOwner(doc, actor, { kind: 'hire', what: `채용: ${names.join(', ')}`, grants: [], hires: names });
+      const approval: Approval = { kind: 'hire', what: `채용: ${names.join(', ')}`, grants: [], hires: names };
+      if (this.config.autonomy && install) {
+        install(names);
+        return this.autoApprove(doc, actor, approval);
+      }
+      return this.blockOnOwner(doc, actor, approval);
     });
   }
 
@@ -897,6 +904,21 @@ export class Board {
         ? '하위 업무가 모두 종료되어 결과 취합 차례'
         : `하위 업무 ${task.id} 종료, 이를 전제로 한 ${dependents.map((c) => c.id).join(', ')} 진행 전 결과 확인 차례`,
     );
+  }
+
+  /**
+   * config.autonomy: the owner delegated approvals. The request is recorded and approved on the
+   * spot (grants applied), and the task keeps running.
+   */
+  private autoApprove(doc: TaskDoc, actor: string, approval: Approval): Task {
+    if (approval.grants.length) {
+      doc.task.grants = [...new Set([...(doc.task.grants ?? []), ...approval.grants])];
+    }
+    this.save(doc);
+    const extra = approval.grants.length ? ` (요청 권한: ${approval.grants.join(', ')})` : '';
+    this.log(doc.task.id, actor, '결재요청', approval.what + extra);
+    this.log(doc.task.id, 'engine', '결재승인', `${approval.what} — 자율 운영(config autonomy: true)으로 자동 승인`);
+    return doc.task;
   }
 
   private blockOnOwner(doc: TaskDoc, actor: string, approval: Approval): Task {
