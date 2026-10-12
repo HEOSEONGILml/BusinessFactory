@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listAgents } from './agents.ts';
 import { imageType, MAX_UPLOAD, resolveAttachment, saveAttachment } from './attachments.ts';
-import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, normalizeId, STATUS_LABEL } from './board.ts';
+import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, lastLogEntry, normalizeId, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { listMemory } from './memory.ts';
@@ -93,18 +93,7 @@ export function statusLabel(t: Task): string {
   return t.status === 'blocked' && t.approval ? '결재대기' : STATUS_LABEL[t.status];
 }
 
-/** The full text of the newest log entry of one kind (entries can span several lines). */
-export function lastLogEntry(log: string, event: string): string {
-  const entries = log.split(/\n(?=- \S+ \[)/);
-  const hit = entries.reverse().find((e) => new RegExp(`^- \\S+ \\[[^\\]]+\\] ${event}:`).test(e));
-  if (!hit) return '';
-  return hit
-    .replace(new RegExp(`^- \\S+ \\[[^\\]]+\\] ${event}: (→ \\S+: )?`), '')
-    .split('\n')
-    .map((l) => l.replace(/^ {2}/, ''))
-    .join('\n')
-    .trim();
-}
+export { lastLogEntry };
 
 function pidEngineStatus(paths: Paths): EngineStatus {
   const pidFile = path.join(paths.company, '.engine', 'pid');

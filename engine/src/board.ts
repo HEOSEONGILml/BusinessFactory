@@ -78,8 +78,19 @@ export interface Task {
   approval?: Approval | null;
   /** Owner has seen the final result (top-level goals). */
   acknowledged?: boolean;
+  /** Asked for in the messenger: the result goes back to that conversation. */
+  origin?: TaskOrigin | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface TaskOrigin {
+  /** Conversation the owner asked in. */
+  conv: string;
+  /** The owner's message that asked for it. */
+  message: string;
+  /** The result has been posted back to the conversation. */
+  reported?: boolean;
 }
 
 export interface Question {
@@ -135,8 +146,23 @@ export interface CreateTaskInput {
   workspace?: string | null;
   project?: string | null;
   priority?: number;
-  /** Parent task id; null creates a top-level goal (owner only). */
+  /** Parent task id; null creates a top-level goal (owner only, or an employee acting on an owner's messenger request). */
   parent: string | null;
+  /** Set when an employee registers work the owner asked for in the messenger. */
+  origin?: { conv: string; message: string } | null;
+}
+
+/** The full text of the newest log entry of one kind (entries can span several lines). */
+export function lastLogEntry(log: string, event: string): string {
+  const entries = log.split(/\n(?=- \S+ \[)/);
+  const hit = entries.reverse().find((e) => new RegExp(`^- \\S+ \\[[^\\]]+\\] ${event}:`).test(e));
+  if (!hit) return '';
+  return hit
+    .replace(new RegExp(`^- \\S+ \\[[^\\]]+\\] ${event}: (→ \\S+: )?`), '')
+    .split('\n')
+    .map((l) => l.replace(/^ {2}/, ''))
+    .join('\n')
+    .trim();
 }
 
 /** A rule violation; the message is shown to whoever called bf. */
@@ -234,7 +260,7 @@ export class Board {
 
       let parent: Task | null = null;
       if (input.parent === null) {
-        if (actor !== this.config.owner) {
+        if (actor !== this.config.owner && !input.origin) {
           throw new BoardError('직원은 자신이 수행 중인 업무의 하위 업무만 만들 수 있습니다.');
         }
       } else {
@@ -268,8 +294,8 @@ export class Board {
         parent: parent?.id ?? null,
         depends_on: dependsOn,
         depth: parent ? parent.depth + 1 : 0,
-        // Whatever reaches the owner is always reviewed.
-        review: parent === null ? true : forOwner ? false : (input.review ?? true),
+        // Whatever reaches the owner is always reviewed, except small messenger requests the employee marked so.
+        review: parent === null ? (input.origin ? (input.review ?? true) : true) : forOwner ? false : (input.review ?? true),
         workspace: input.workspace ?? parent?.workspace ?? null,
         project: input.project ?? parent?.project ?? null,
         priority: input.priority ?? parent?.priority ?? 0,
@@ -281,6 +307,7 @@ export class Board {
         grants: [],
         approval: null,
         acknowledged: false,
+        origin: input.origin ? { conv: input.origin.conv, message: input.origin.message } : null,
         created_at: ts,
         updated_at: ts,
       };
@@ -482,6 +509,21 @@ export class Board {
       this.save(doc);
       this.closeThread(id, actor, '결재 반려');
       this.log(id, actor, '결재반려', `${approval.what} — ${reason}`);
+      return doc.task;
+    });
+  }
+
+  /**
+   * Engine: the result of a messenger request was posted back to its conversation. A success
+   * counts as seen there; a failure or cancellation stays in the inbox.
+   */
+  markOriginReported(id: string): Task {
+    return this.locked(() => {
+      const doc = this.read(id);
+      if (!doc.task.origin) return doc.task;
+      doc.task.origin.reported = true;
+      if (doc.task.status === 'done' && doc.task.parent === null) doc.task.acknowledged = true;
+      this.save(doc);
       return doc.task;
     });
   }

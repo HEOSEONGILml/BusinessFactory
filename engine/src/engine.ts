@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getAgent, listAgents } from './agents.ts';
 import type { AgentInfo } from './agents.ts';
-import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, STATUS_LABEL } from './board.ts';
+import { Board, BoardError, DEFAULT_GOAL_DONE_WHEN, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
 import type { Config } from './config.ts';
 import { writeFileAtomic } from './fsutil.ts';
@@ -194,6 +194,7 @@ export class Engine {
   tick(): void {
     if (this.haltReason && !this.autoResume()) return;
     this.notifyOwner();
+    this.reportOrigins();
     if (!this.enabled) return;
     this.fireSchedules();
     if (this.pausedUntil) {
@@ -259,6 +260,30 @@ export class Engine {
   }
 
   // ---- messenger and meetings ----
+
+  /** Work asked for in the messenger: once it ends, say how it went in that conversation. */
+  private reportOrigins(): void {
+    for (const t of this.board.list()) {
+      if (!t.origin || t.origin.reported || !isTerminal(t.status)) continue;
+      try {
+        const log = this.board.readLog(t.id);
+        const text =
+          t.status === 'done'
+            ? `✅ **${t.id} 완료** — ${t.title}\n\n${truncate(lastLogEntry(log, '완료보고') || '(요약 없음)', 1500)}\n\n결과물: 업무 ${t.id} 의 output/`
+            : t.status === 'failed'
+              ? `❌ **${t.id} 실패** — ${t.title}\n\n${truncate(lastLogEntry(log, '실패') || '(사유 없음)', 1000)}\n\n처리할 일에서 확인해 주세요.`
+              : `🚫 **${t.id} 취소됨** — ${t.title}`;
+        const conv = getConv(this.paths, t.origin.conv);
+        // A DM only takes its two members; fall back to whoever took the request there.
+        const from = conv.kind === 'dm' && !conv.members.includes(t.assignee) ? t.created_by : t.assignee;
+        postMessage(this.paths, conv.id, from, text, { chain: this.config.chat.max_chain, kind: 'system' });
+        this.log(`💬 ${conv.title} ← ${t.id} 결과 보고 (${STATUS_LABEL[t.status]})`);
+      } catch (e) {
+        this.log(`${t.id} 결과를 대화에 올리지 못함: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      this.board.markOriginReported(t.id);
+    }
+  }
 
   /** Meetings speak one at a time; outside meetings, DMs and @mentions get replies. */
   private tickChat(): void {
@@ -507,8 +532,10 @@ export class Engine {
       lines.push(
         '회의를 마칩니다. 당신은 진행자로서 회의록을 작성하세요.',
         '- 최종 출력은 회의록 본문(마크다운) 그대로입니다.',
-        '- 구성: ## 결론 / ## 결정 사항 / ## 할 일 (항목마다 제안 담당자) / ## 남은 쟁점',
+        '- 구성: ## 결론 / ## 결정 사항 / ## 할 일 (항목마다 담당자) / ## 남은 쟁점',
         '- 대화에 실제로 나온 내용만 씁니다. 합의되지 않은 것은 남은 쟁점으로 둡니다.',
+        '- 회의에서 합의된 할 일은 회의록을 쓰기 전에 항목마다 `bf chat task --to <담당자> --title "<할 일>" --desc "<배경과 회의 결론>" --done-when "<검수자가 파일만 보고 판정할 조건>"` 으로 업무를 등록하고, 회의록의 할 일 항목 옆에 업무 번호(T0123)를 적습니다. 결과는 끝나면 이 회의실에 올라옵니다.',
+        '- 합의되지 않았거나 사용자가 하지 말자고 한 일은 등록하지 않습니다. 여러 단계가 필요한 큰 일은 --to ceo 로 하나만 등록합니다.',
       );
     } else {
       lines.push(
@@ -516,7 +543,12 @@ export class Engine {
         '- 최종 출력은 보낼 메시지 본문 그대로입니다. 인사말, 서명, 따옴표 없이 씁니다.',
         '- 대화체로 짧고 구체적으로 씁니다. 보통 2~6문장입니다. 동의만 반복하지 말고 자기 관점(근거, 우려, 대안)을 더합니다.',
         '- 사실 확인이 필요하면 bf task list / bf task show / bf memory show 와 파일 읽기로 확인합니다. 추측은 추측이라고 밝힙니다.',
-        '- 메신저에서는 일을 직접 처리하지 않습니다. 실제 작업이 필요하면 사용자에게 "목표로 등록하자"고 제안합니다.',
+        '- 메신저에서는 파일을 고치거나 작업을 직접 하지 않습니다. 대신 **사용자가 일을 부탁하거나 지시하면** 그 자리에서 업무로 등록합니다:',
+        '  `bf chat task --title "<할 일 한 문장>" --desc "<배경, 요청 내용, 참고 경로>" --done-when "<검수자가 파일만 보고 판정할 조건>" [--to <직원>] [--workspace <작업 공간>] [--no-review]`',
+        '  - 담당: 내 직무면 생략(자신), 다른 직무면 --to <직원>, 여러 단계·여러 직무가 필요한 큰 일이면 --to ceo.',
+        '  - 문구 수정처럼 작고 확인이 쉬운 일만 --no-review 를 붙입니다. 코드·작업 공간을 고치는 일은 --workspace 를 지정합니다.',
+        '  - 등록했으면 답장에 업무 번호와 무엇을 하기로 했는지 한두 문장으로 알립니다. 끝나면 결과가 이 대화에 자동으로 올라온다고 덧붙입니다.',
+        '  - 사용자가 부탁하지 않은 일은 등록하지 않습니다. 필요해 보이면 제안만 하고, 사용자가 하자고 하면 등록합니다. 요청이 모호하면 등록하기 전에 짧게 되묻습니다.',
         `- 다른 직원의 의견이 꼭 필요할 때만 @이름 으로 부릅니다. 직원: ${staff}`,
         '- bf chat post 로 따로 보내지 마세요. 최종 출력이 곧 메시지입니다.',
         '- 덧붙일 말이 없으면 정확히 (패스) 라고만 출력합니다.',
@@ -792,6 +824,11 @@ export class Engine {
       `- 먼저 \`bf task show ${task.id}\` 로 지시서, 하위 업무, 이력을 확인하세요.`,
     ];
     if (workspaceDir) lines.push(`- 작업 공간: ${workspaceDir}`);
+    if (task.origin) {
+      lines.push(
+        `- 이 업무는 사용자가 메신저에서 부탁한 일입니다. 맥락이 필요하면 \`bf chat read ${task.origin.conv}\` 로 대화를 읽으세요. 끝나면 완료 보고 요약이 그 대화에 자동으로 올라가니, 요약은 사용자에게 답하듯 쓰세요.`,
+      );
+    }
     const kids = this.board.children(task.id);
     const questions = kids.filter((k) => k.status === 'blocked' && !k.approval && k.ask_to === task.assignee);
     if (questions.length > 0) {

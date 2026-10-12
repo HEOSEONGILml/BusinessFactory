@@ -156,7 +156,8 @@ export function postMessage(
   if (body.length > 20_000) throw new BoardError('메시지가 너무 깁니다.');
   const conv = getConv(paths, convId);
   if (conv.kind === 'dm' && !conv.members.includes(from)) throw new BoardError('이 DM의 참여자가 아닙니다.');
-  if (conv.kind === 'meeting' && conv.status === 'closed') throw new BoardError('끝난 회의입니다.');
+  // System notes (e.g. results of work the meeting asked for) may still land in a closed meeting.
+  if (conv.kind === 'meeting' && conv.status === 'closed' && opts.kind !== 'system') throw new BoardError('끝난 회의입니다.');
   const msg: Message = {
     id: `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`,
     at: new Date().toISOString(),
@@ -171,6 +172,11 @@ export function postMessage(
     fs.appendFileSync(convFile(paths, convId, 'jsonl'), JSON.stringify(msg) + '\n', 'utf8');
   });
   return msg;
+}
+
+/** The owner's newest message in a conversation (what a messenger task is registered against). */
+export function lastOwnerMessage(paths: Paths, convId: string, owner: string): Message | null {
+  return readMessages(paths, convId, 200).filter((m) => m.from === owner && m.kind === 'text').at(-1) ?? null;
 }
 
 export function readMessages(paths: Paths, convId: string, limit = 200): Message[] {

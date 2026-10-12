@@ -9,7 +9,7 @@ import { loadConfig } from './config.ts';
 import type { Config } from './config.ts';
 import { Engine } from './engine.ts';
 import { addMemory, listMemory, readMemory } from './memory.ts';
-import { listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
+import { getConv, lastOwnerMessage, listConvs, ownerSpokeInMeeting, postMessage, readMessages, resolveTarget, transcript } from './chat.ts';
 import { discardHires, installHires, pendingProposals, stageProposals } from './staff.ts';
 import { printUsage } from './usage.ts';
 import { formatUsageSnapshot, lastActivity, readUsageSnapshot, watch } from './watch.ts';
@@ -61,10 +61,12 @@ const HELP = `bf — BusinessFactory 업무 보드
   bf memory list | bf memory show <주제>
   bf memory add <주제> "<내용>" [--title "<새 주제 제목>"]
 
-메신저 (대화용 — 실제 일은 목표·업무로)
+메신저 (대화용 — 부탁받은 일은 bf chat task 로 업무 등록)
   bf chat list                            채널·DM·회의 목록
   bf chat read <#채널|@직원|대화id> [--limit n]
   bf chat post <#채널|@직원|대화id> "<메시지>"   (@이름 으로 부르면 그 직원이 답장)
+  bf chat task --title ... --done-when ... [--to 직원] [--desc ...] [--workspace ...] [--no-review]
+                                          메신저·회의에서 사용자가 부탁한 일을 업무로 등록 (결과는 그 대화에 보고)
   bf dm <직원> "<메시지>"
 
 환경변수
@@ -276,6 +278,7 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
         io.out(`${conv.title} 에 보냈습니다.${msg.mentions.length ? ` (${msg.mentions.join(', ')} 에게 답장 요청)` : ''}`);
         return 0;
       }
+      if (sub === 'task') return chatTask(rest, { board, actor, currentTask, io }, env, names);
       if (sub === 'read') {
         const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { limit: { type: 'string' } } });
         if (!positionals[0]) throw new BoardError('읽을 대화가 필요합니다. 예: bf chat read #general');
@@ -291,7 +294,7 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
         for (const c of convs) io.out(`${c.kind.padEnd(8)} ${c.id.padEnd(36)} ${c.title}${c.status ? ` [${c.status}]` : ''}`);
         return 0;
       }
-      throw new BoardError('사용법: bf chat list | read <대상> | post <대상> "<메시지>" | bf dm <직원> "<메시지>"');
+      throw new BoardError('사용법: bf chat list | read <대상> | post <대상> "<메시지>" | task --title ... --done-when ... | bf dm <직원> "<메시지>"');
     }
 
     case 'usage': {
@@ -309,6 +312,60 @@ function run(argv: string[], env: NodeJS.ProcessEnv, io: Io): number {
       io.err(`알 수 없는 명령: ${cmd}\n\n${HELP}`);
       return 2;
   }
+}
+
+/** Most tasks one owner message can turn into (stops a chatty reply from flooding the board). */
+const MAX_TASKS_PER_REQUEST = 5;
+
+/**
+ * `bf chat task`: in a messenger reply or meeting, register work the owner asked for. It becomes a
+ * top-level task tied to that owner message, and its result is posted back to the conversation.
+ */
+function chatTask(args: string[], ctx: TaskCtx, env: NodeJS.ProcessEnv, names: string[]): number {
+  const { board, actor, io } = ctx;
+  const { values } = parseArgs({
+    args,
+    options: {
+      to: { type: 'string' },
+      title: { type: 'string' },
+      desc: { type: 'string' },
+      'done-when': { type: 'string', multiple: true },
+      depends: { type: 'string', multiple: true },
+      'no-review': { type: 'boolean' },
+      workspace: { type: 'string' },
+      project: { type: 'string' },
+      priority: { type: 'string' },
+    },
+  });
+  const convId = env.BF_CHAT;
+  if (!convId) throw new BoardError('bf chat task 는 메신저·회의에서 답할 때만 씁니다. 업무 중에는 bf task create 를 쓰세요.');
+  const owner = board.config.owner;
+  if (actor === owner) throw new BoardError('사용자는 bf goal 로 목표를 등록하세요.');
+  const conv = getConv(board.paths, convId);
+  const request = lastOwnerMessage(board.paths, convId, owner);
+  if (!request) throw new BoardError('사용자가 이 대화에서 부탁한 일이 없습니다. 업무는 사용자의 요청이 있을 때만 등록합니다.');
+  const already = board.list().filter((t) => t.origin?.conv === convId && t.origin.message === request.id);
+  if (already.length >= MAX_TASKS_PER_REQUEST) {
+    throw new BoardError(`이 요청으로 이미 업무 ${already.length}건(${already.map((t) => t.id).join(', ')})을 만들었습니다.`);
+  }
+  const assignee = values.to ?? actor;
+  if (!names.includes(assignee)) throw new BoardError(`존재하지 않는 직원입니다: ${assignee}`);
+  const where = conv.kind === 'dm' ? 'DM' : conv.kind === 'meeting' ? `회의 "${conv.title}"` : `채널 ${conv.title}`;
+  const task = board.createTask(actor, {
+    title: values.title ?? '',
+    assignee,
+    description: `${values.desc?.trim() || '(없음)'}\n\n출처: ${where} 에서 사용자 요청 (대화 맥락: \`bf chat read ${conv.id}\`)`,
+    doneWhen: values['done-when'] ?? [],
+    dependsOn: (values.depends ?? []).flatMap((d) => d.split(',')).filter(Boolean),
+    review: !values['no-review'],
+    workspace: values.workspace,
+    project: values.project ?? conv.project ?? undefined,
+    priority: values.priority === undefined ? undefined : parsePriority(values.priority),
+    parent: null,
+    origin: { conv: conv.id, message: request.id },
+  });
+  io.out(`업무 등록: ${task.id} → ${task.assignee} (끝나면 결과가 이 대화에 올라옵니다)`);
+  return 0;
 }
 
 interface TaskCtx {

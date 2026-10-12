@@ -4,6 +4,8 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { BoardError } from '../src/board.ts';
+import { ensureDm, postMessage, readMessages } from '../src/chat.ts';
+import { main } from '../src/cli.ts';
 import { DEFAULT_CONFIG } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { Engine } from '../src/engine.ts';
@@ -161,6 +163,41 @@ describe('엔진', () => {
     assert.equal(calls().length, 0, '건너뛴 패스에서는 실행하지 않는다');
     await engine.runUntilIdle();
     assert.equal(board.read('T0001').task.status, 'done');
+  });
+
+  it('메신저에서 사용자가 부탁한 일은 업무가 되고, 끝나면 결과가 그 대화에 올라온다', async () => {
+    const { engine, board, paths, root } = setup({ worker: 'done' });
+    const dm = ensureDm(paths, 'owner', 'worker');
+    const bfAs = (env: Record<string, string>, args: string[]) => {
+      const err: string[] = [];
+      const code = main(args, { BF_ROOT: root, ...env }, { out: () => {}, err: (s) => err.push(s) });
+      return { code, err: err.join('\n') };
+    };
+    const args = ['chat', 'task', '--title', '오타 수정', '--done-when', 'README 오타가 없다', '--no-review'];
+
+    // 사용자의 요청이 없으면 등록하지 않는다
+    assert.match(bfAs({ BF_ACTOR: 'worker', BF_CHAT: dm.id }, args).err, /사용자가 이 대화에서 부탁한 일이 없습니다/);
+    // 업무 실행 중에는 bf chat task 를 쓰지 않는다
+    assert.match(bfAs({ BF_ACTOR: 'worker' }, args).err, /메신저·회의에서 답할 때만/);
+
+    postMessage(paths, dm.id, 'owner', 'README 오타 좀 고쳐 줘', { chain: 0 });
+    const r = bfAs({ BF_ACTOR: 'worker', BF_CHAT: dm.id }, args);
+    assert.equal(r.code, 0, r.err);
+    const task = board.read('T0001').task;
+    assert.equal(task.parent, null);
+    assert.equal(task.assignee, 'worker');
+    assert.equal(task.review, false);
+    assert.equal(task.origin?.conv, dm.id);
+
+    await engine.runUntilIdle();
+    const after = board.read('T0001').task;
+    assert.equal(after.status, 'done');
+    assert.equal(after.acknowledged, true, '대화에 보고된 성공은 처리할 일에 남기지 않는다');
+    // The worker also answers the owner's DM itself, so look for the report rather than the last message.
+    const reports = readMessages(paths, dm.id).filter((m) => m.kind === 'system');
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].from, 'worker');
+    assert.match(reports[0].text, /T0001 완료/);
   });
 
   it('보고 없이 끝나면 재시도하고, 한도를 넘으면 실패한다', async () => {
