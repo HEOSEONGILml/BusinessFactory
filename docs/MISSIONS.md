@@ -215,3 +215,17 @@ missions:
 - **자기 수정**: 미션이 BusinessFactory 시스템 코드를 고치는 일은 헌장에 명시될 때만 한다(단계 템플릿).
 - **엔진 재시작 필요**: 미션 루프·후보 정렬은 엔진 프로세스 안에 있다. `bf mission` 명령은 재시작 없이 바로 쓸 수 있지만, 단계 생성은 새 코드로 엔진을 다시 띄운 뒤부터 동작한다.
 - 탐침 중 사용률이 계속 높으면 6시간마다 미션 실행 1건이 나간다(의도된 비용).
+
+## 레퍼런스
+
+| 출처 | 가져온 점 | 우리와 다른 점 |
+|---|---|---|
+| BabyAGI — https://github.com/yoheinakajima/babyagi | 목표 하나를 두고 "작업 실행 → 결과로 다음 작업 생성 → 우선순위 재정렬"을 반복하는 루프. 단계가 끝나면 다음 단계를 스스로 정하는 3장 루프의 원형 | 멈춤 조건·예산이 없어 무한히 돈다. 우리는 단계마다 검수를 거치고 사용량·정체·달성 판정으로 멈춘다(5·6장) |
+| AutoGPT — https://github.com/Significant-Gravitas/AutoGPT | 장기 목표를 주면 계획·실행·자기 평가를 반복하는 자율 에이전트. 폭주와 같은 판단 반복이 대표 실패 유형이라는 점을 6장 정체 판정(빈 단계 연속 2회 → paused)의 근거로 씀 | 한 에이전트가 혼자 돈다. 우리는 단계마다 ceo가 새로 실행되고 reviewer 검수·계획 검토가 끼며, 연속성은 헌장·journal 파일로만 잇는다 |
+| OpenAI Agents SDK, Running agents — https://openai.github.io/openai-agents-python/running_agents/ | `max_turns` 초과 시 실행을 끊는 반복 상한 가드레일. 고정 구조 제한 대신 "실행량"으로 끊는 방식 | 실행 한 번 안의 턴 상한이다. 우리는 미션 단위 7일 사용량 상한과 구독 사용률 상한으로 여러 실행에 걸쳐 끊는다(6장). max_depth 같은 구조 제한은 없앴다(10장) |
+| AutoGen AgentChat, Termination — https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/termination.html | 종료 조건을 조합하는 설계(최대 메시지 수, 토큰 사용량, 외부 중지, 특정 문구). 멈출 조건을 사용량·사람 중지·달성 선언 여럿으로 두고 OR로 묶는 6장 구조에 반영 | AutoGen은 대화 한 판의 종료다. 우리는 달성·정체 선언을 검수 통과 후에만 확정해, 에이전트의 자기 선언만으로 끝나지 않게 했다(5장) |
+| LangGraph recursion limit — https://langchain-ai.github.io/langgraph/how-tos/recursion-limit/ | 그래프 단계 수 상한(recursion_limit)으로 순환을 끊는 방식. 반복 상한이 있어야 순환 구조가 안전하다는 근거 | 상한이 걸리면 오류로 끝난다. 우리는 상한(예산 초과) 시 미션을 끝내지 않고 대기시킨 뒤 6시간마다 탐침해 재개하고 owner에게 보고한다(6·8장) |
+| Anthropic, Building effective agents — https://www.anthropic.com/engineering/building-effective-agents | 자율 에이전트는 비용·오류 누적 위험이 있으니 반복 상한 같은 정지 조건과 사람 확인 지점을 두라는 권고, 작은 일은 단순 워크플로로 처리하라는 원칙 → 작은 목표는 기존 업무 단위 유지, 큰 단계만 계획 검토(1·4장) | 일반 원칙 글이다. 사람 확인 지점은 우리 기존 결재 대상(돈·외부 공개·계정·삭제)으로 한정했다 |
+| OKR 운영 관행 — https://www.whatmatters.com/faqs/okr-meaning-definition-example | 분기 단위 목표(Objective)와 측정 가능한 핵심 결과(Key Results), 주기 점검. 미션 = 분기 규모 방향, 헌장의 성공 판정 기준, 정기 보고 구조에 반영(2·8장) | OKR은 사람이 분기 초에 정하고 주기 점검한다. 우리는 단계마다 ceo가 헌장 대비 진척을 평가하고 다음 단계를 스스로 정한다 |
+| 회사 지난 결과물: 설계 초안 비판 검토 — /home/ubuntu/BusinessFactory/company/board/T0086/output/design-review.md | 필수 5건·권장 11건 지적(예산이 진행 중 단계를 못 막음, max_depth null 처리, achieve 선확정 등) | 12장 반영표에 항목별로 적었다 |
+| 회사 플레이북 — /home/ubuntu/BusinessFactory/company/playbooks/service-discovery.md | 첫 미션 헌장의 절차(발굴 체크리스트, D6 마케팅 제안서) | 미션 단위가 아니라 서비스 한 건 기준 절차라, 미션 헌장이 이를 단계별로 반복 적용한다 |
