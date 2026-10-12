@@ -198,7 +198,11 @@ describe('엔진 감시', () => {
     fs.writeFileSync(path.join(company, '.engine', 'pid'), String(process.pid));
     const beat = (at: Date, halted: string | null = null) =>
       fs.writeFileSync(path.join(company, '.engine-heartbeat.json'), JSON.stringify({ pid: process.pid, at: at.toISOString(), enabled: true, halted }));
-    assert.equal(check().code, 2, '박동이 없으면 멈춘 것');
+    assert.match(check().out, /시작 중/, '막 시작해 박동이 아직 없으면 재시작하지 않는다');
+    assert.equal(check().code, 0);
+    const old = new Date(Date.now() - 600_000);
+    fs.utimesSync(path.join(company, '.engine', 'pid'), old, old);
+    assert.equal(check().code, 2, '시작한 지 오래됐는데 박동이 없으면 멈춘 것');
     beat(new Date(Date.now() - 600_000));
     assert.equal(check().code, 2, '오래된 박동은 멈춘 것');
     beat(new Date());

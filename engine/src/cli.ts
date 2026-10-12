@@ -700,6 +700,13 @@ function engineCheck(paths: Paths, config: Config, io: Io): number {
     // no beat yet
   }
   const age = beat.pid === pid && beat.at ? (Date.now() - Date.parse(beat.at)) / 1000 : Infinity;
+  // A process that just started has not beaten yet (its first pass runs before the first beat).
+  // Restarting it then kills the runs it just launched and loops the watchdog, so give it time.
+  const startedAgo = (Date.now() - fs.statSync(pidFile).mtimeMs) / 1000;
+  if (!Number.isFinite(age) && startedAgo <= config.watchdog.stale_seconds) {
+    io.out(`엔진: 시작 중 (pid ${pid}, ${Math.round(startedAgo)}초 전 시작, 아직 신호 없음)`);
+    return 0;
+  }
   if (!(age <= config.watchdog.stale_seconds)) {
     io.out(`엔진: 응답 없음 (pid ${pid}, 마지막 신호 ${Number.isFinite(age) ? `${Math.round(age)}초 전` : '없음'})`);
     return 2;

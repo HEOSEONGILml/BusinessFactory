@@ -103,6 +103,8 @@ export class Engine {
   private readonly chatActive = new Map<string, ChatRun>();
   /** Assignees replying to the owner's comments on inbox items, by task id. */
   private readonly threadActive = new Map<string, ChatRun>();
+  /** Failed replies in a row, by task id; retried a few times before telling the owner. */
+  private readonly threadFailures = new Map<string, number>();
   /** The on/off switch. Off: no new runs start; runs in progress finish. */
   private enabled: boolean;
 
@@ -581,9 +583,29 @@ export class Engine {
     }
     const text = r.text.trim();
     if (r.isError || r.timedOut || !text) {
-      this.log(`💬 ${taskId} — ${agent} 코멘트 답변 실패: ${(r.text || r.stderr || '출력 없음').split('\n')[0].slice(0, 120)}`);
+      const why = (r.text || r.stderr || '출력 없음').split('\n')[0].slice(0, 120);
+      const tries = (this.threadFailures.get(taskId) ?? 0) + 1;
+      if (tries < 3) {
+        // Give the turn back so the next pass retries it (e.g. the run was killed by a restart).
+        // Otherwise the card says "곧 확인합니다" forever and nobody answers.
+        this.threadFailures.set(taskId, tries);
+        this.setThreadCursor(taskId, previousCursor);
+        this.log(`💬 ${taskId} — ${agent} 코멘트 답변 실패 (${tries}/3, 다시 시도): ${why}`);
+      } else {
+        this.threadFailures.delete(taskId);
+        this.log(`💬 ${taskId} — ${agent} 코멘트 답변 실패 (포기): ${why}`);
+        const note = `⚠️ [엔진] ${agent} 의 답변 작성이 3번 연속 실패했습니다 (${why}). 코멘트를 다시 달면 다시 시도합니다.`;
+        try {
+          // Posted under the responder's name: only the owner and the responder may comment here.
+          this.board.threadPost(agent, taskId, note, item);
+        } catch {
+          this.board.comment('engine', taskId, note);
+        }
+        this.commit(`${taskId} engine: 코멘트 답변 실패`);
+      }
       return;
     }
+    this.threadFailures.delete(taskId);
     try {
       this.board.threadPost(agent, taskId, text, item);
       this.notify({ title: `코멘트 · ${taskId} · ${agent}`, body: text.slice(0, 200) });

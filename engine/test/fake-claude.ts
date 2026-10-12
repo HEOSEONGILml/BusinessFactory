@@ -86,6 +86,7 @@ function reply(result: string, extra: Record<string, unknown> = {}) {
 if (prompt.startsWith('[코멘트]')) {
   // Reply to the owner's comment on an inbox item: the final output is the comment.
   const last = prompt.split('\n---\n')[1]?.trim().split('\n\n').pop() ?? '';
+  if (plan[`comment:${agent}`] === 'die') process.exit(143); // killed mid-reply (e.g. a restart): no output
   reply(`${agent} 확인: ${last.replace(/^\[[^\]]+\] /, '')}`);
   process.exit(0);
 }

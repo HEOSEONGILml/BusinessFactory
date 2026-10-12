@@ -19,4 +19,6 @@ code=$?
 
 echo "$msg — $SERVICE 재시작"
 echo "[$(date '+%-m/%-d/%Y, %-I:%M:%S %p')] 감시: $msg — 서비스 재시작" >> company/engine.log
-systemctl restart "$SERVICE"
+# --no-block: a graceful stop can take minutes; waiting here makes the timer fire again the moment
+# the new process starts, before its first heartbeat.
+systemctl restart --no-block "$SERVICE"

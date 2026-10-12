@@ -381,6 +381,20 @@ describe('처리할 일 코멘트', () => {
     assert.equal(board.openThread(id).length, 4);
   });
 
+  it('코멘트 답변이 중간에 죽으면 다시 시도하고, 계속 실패하면 스레드에 알린다', async () => {
+    const { engine, board, calls } = setup({ 'comment:ceo': 'die' });
+    const id = asked(board);
+    board.threadPost('owner', id, '왜 멈춰 있나요');
+    await engine.runUntilIdle();
+
+    assert.equal(calls().filter((c) => c.prompt.startsWith('[코멘트]')).length, 3, '두 번 더 다시 시도');
+    const last = board.openThread(id).at(-1)!;
+    assert.equal(last.from, 'ceo', '"곧 확인합니다"에 멈춰 있지 않고 실패를 알린다');
+    assert.match(last.text, /\[엔진\].*3번 연속 실패/);
+    await engine.runUntilIdle();
+    assert.equal(calls().filter((c) => c.prompt.startsWith('[코멘트]')).length, 3, '알린 뒤에는 새 코멘트까지 기다린다');
+  });
+
   it('답변 확정 때 코멘트 전체가 답변으로 넘어가고 스레드는 비워진다', () => {
     const { board } = setup({});
     const id = asked(board);
