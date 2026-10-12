@@ -604,6 +604,25 @@ export class Engine {
     ];
   }
 
+  /**
+   * Meeting turns: passing is the default, and nobody plans around a direction the owner
+   * hasn't confirmed. The facilitator speaks first and calls in only the people needed.
+   */
+  private meetingLines(conv: Conversation, agent: string): string[] {
+    const others = conv.members.filter((m) => m !== agent && m !== this.config.owner);
+    const lines = [
+      '- **기본은 (패스)입니다.** 다음 중 하나가 있을 때만 발언합니다: (1) 대화에 아직 없는 새 사실, (2) 앞 의견에 대한 반대 근거나 빠진 위험, (3) 사용자가 당신에게 한 질문이나 당신 직무에 대한 질문의 직접 답. 앞사람과 같은 취지이거나 동의·보충뿐이면 (패스)합니다. 모두가 돌아가며 발언할 필요는 없습니다.',
+      '- **사용자가 아직 정하지(컨펌하지) 않은 방향을 확정된 것처럼 다루지 않습니다.** 그런 방향이 있으면 선택지와 근거·위험만 제시하고, 그 방향을 전제로 한 역할 분담, 담당 자원, 완료 조건, 채용 계획, "하자고 하시면 업무로 등록할게요" 같은 제안은 하지 않습니다. 실행 계획은 사용자가 방향을 정한 뒤에 논의합니다.',
+    ];
+    if (agent === conv.facilitator) {
+      lines.push(
+        `- 당신은 진행자라 가장 먼저 발언합니다. 사용자 발언에 답하고, 다른 참석자(${others.join(', ') || '없음'})의 의견이 꼭 필요할 때만 그 사람을 @이름 으로 지명합니다. 지명하지 않은 참석자는 발언하지 않습니다. 당신 혼자 답할 수 있으면 아무도 지명하지 않습니다.`,
+        '- 사용자가 결정해야 할 것이 있으면 선택지를 정리해 사용자에게 묻고 멈춥니다.',
+      );
+    }
+    return lines;
+  }
+
   private chatPrompt(conv: Conversation, agent: string, mode: ChatMode): string {
     const staff = listAgents(this.paths).map((a) => `${a.name}(${a.description})`).join(', ');
     const where =
@@ -624,15 +643,18 @@ export class Engine {
         '회의를 마칩니다. 당신은 진행자로서 회의록을 작성하세요.',
         '- 최종 출력은 회의록 본문(마크다운) 그대로입니다.',
         '- 구성: ## 결론 / ## 결정 사항 / ## 할 일 (항목마다 담당자) / ## 남은 쟁점',
-        '- 대화에 실제로 나온 내용만 씁니다. 합의되지 않은 것은 남은 쟁점으로 둡니다.',
+        '- 대화에 실제로 나온 내용만 씁니다. 합의되지 않은 것과 사용자가 컨펌하지 않은 방향은 결정 사항이 아니라 남은 쟁점으로 둡니다.',
         '- 회의에서 합의된 할 일은 회의록을 쓰기 전에 항목마다 `bf chat task --to <담당자> --title "<할 일>" --desc "<배경과 회의 결론>" --done-when "<검수자가 파일만 보고 판정할 조건>"` 으로 업무를 등록하고, 회의록의 할 일 항목 옆에 업무 번호(T0123)를 적습니다. 결과는 끝나면 이 회의실에 올라옵니다.',
-        '- 합의되지 않았거나 사용자가 하지 말자고 한 일은 등록하지 않습니다. 여러 단계가 필요한 큰 일은 --to ceo 로 하나만 등록합니다.',
+        '- 합의되지 않았거나, 사용자가 컨펌하지 않은 방향을 전제로 하거나, 사용자가 하지 말자고 한 일은 등록하지 않습니다. 여러 단계가 필요한 큰 일은 --to ceo 로 하나만 등록합니다.',
       );
     } else {
       lines.push(
-        mode === 'meeting' ? '지금 당신의 발언 차례입니다. 앞사람들의 의견을 보고 이어서 말하세요.' : '이 대화에 답장하세요.',
+        mode === 'meeting' ? '지금 당신의 발언 차례입니다. 다만 할 말이 꼭 있을 때만 발언합니다.' : '이 대화에 답장하세요.',
+        ...(mode === 'meeting' ? this.meetingLines(conv, agent) : []),
         '- 최종 출력은 보낼 메시지 본문 그대로입니다. 인사말, 서명, 따옴표 없이 씁니다.',
-        '- 대화체로 짧고 구체적으로 씁니다. 보통 2~6문장입니다. 동의만 반복하지 말고 자기 관점(근거, 우려, 대안)을 더합니다.',
+        mode === 'meeting'
+          ? '- 발언한다면 대화체로 짧고 구체적으로 씁니다. 보통 2~5문장입니다.'
+          : '- 대화체로 짧고 구체적으로 씁니다. 보통 2~6문장입니다. 동의만 반복하지 말고 자기 관점(근거, 우려, 대안)을 더합니다.',
         `- 사실 확인이 필요하면 bf task list / bf task show / bf memory show 와 파일 읽기${this.config.full_access ? ', 셸 명령(git log 등)' : ''}로 직접 확인합니다. 추측은 추측이라고 밝힙니다.`,
         ...this.directWorkLines(),
         this.config.full_access
@@ -645,7 +667,7 @@ export class Engine {
         '  - 사용자가 부탁하지 않은 일은 등록하지 않습니다. 필요해 보이면 제안만 하고, 사용자가 하자고 하면 등록합니다. 요청이 모호하면 등록하기 전에 짧게 되묻습니다.',
         `- 다른 직원의 의견이 꼭 필요할 때만 @이름 으로 부릅니다. 직원: ${staff}`,
         '- bf chat post 로 따로 보내지 마세요. 최종 출력이 곧 메시지입니다.',
-        '- 덧붙일 말이 없으면 정확히 (패스) 라고만 출력합니다.',
+        mode === 'meeting' ? '- 발언할 조건에 해당하지 않으면 정확히 (패스) 라고만 출력합니다.' : '- 덧붙일 말이 없으면 정확히 (패스) 라고만 출력합니다.',
       );
     }
     return lines.join('\n');

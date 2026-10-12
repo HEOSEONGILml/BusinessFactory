@@ -275,12 +275,16 @@ function participants(conv: Conversation, agentNames: string[]): string[] {
   return conv.facilitator && list.includes(conv.facilitator) ? [conv.facilitator, ...list.filter((m) => m !== conv.facilitator)] : list;
 }
 
-/** The owner spoke: whoever they @mentioned answers, otherwise everyone takes a turn. */
+/**
+ * The owner spoke: whoever they @mentioned answers. Otherwise only the facilitator answers and
+ * @mentions the colleagues actually needed (the engine queues them), so nobody runs just to agree.
+ * "One more round" (meetingNextRound) still gives everyone a turn.
+ */
 export function ownerSpokeInMeeting(paths: Paths, convId: string, mentions: string[], agentNames: string[]): Conversation {
   const conv = getConv(paths, convId);
   const all = participants(conv, agentNames);
   const named = all.filter((m) => mentions.includes(m));
-  conv.queue = named.length ? named : all;
+  conv.queue = named.length ? named : all.slice(0, 1);
   conv.turns_since_owner = 0;
   saveConv(paths, conv);
   return conv;

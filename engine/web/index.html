@@ -427,7 +427,7 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
     <textarea id="meetAgenda" class="field" style="min-height:110px" placeholder="예) 토스 미니앱 출시와 주식 섹션 중 무엇을 먼저 할지, 각자 근거를 들어 의견을 주세요."></textarea>
     <h4>참석자</h4>
     <div class="pick" id="meetPeople"></div>
-    <p class="hint">참석자가 한 명씩 차례로 발언합니다. 발언 하나가 실행 한 번이라 사용량이 듭니다.</p>
+    <p class="hint">진행자가 먼저 답하고, 의견이 필요한 참석자만 지명해 발언시킵니다. 할 말이 없으면 패스합니다. 발언 하나가 실행 한 번이라 사용량이 듭니다.</p>
     <div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn primary" id="meetStart">회의 시작</button></div>
   </div>
 </dialog>
@@ -1264,7 +1264,7 @@ async function openConv(id, keepScroll) {
   const typing = speaking.length
     ? speaking.map((s) => `<b>${esc(s.agent)}</b> ${meeting ? '발언' : '답장'} 작성 중<span class="dots"></span>${s.activity ? ` <span style="color:var(--faint)">▸ ${esc(s.activity)}</span>` : ''}`).join('<br>')
     : meeting && conv.queue?.length ? `다음 발언: <b>${esc(conv.queue.join(' → '))}</b>${state?.engine?.running ? '' : ' (엔진이 켜지면 시작합니다)'}`
-    : meeting && conv.status === 'open' ? '모두 발언했습니다. 의견을 더 주시거나, 한 바퀴 더 돌리거나, 회의를 마치세요.'
+    : meeting && conv.status === 'open' ? '발언이 끝났습니다. 의견을 더 주시거나, @이름 으로 지명하거나, 전원 한 바퀴 더 돌리거나, 회의를 마치세요.'
     : conv.kind === 'channel' ? '@이름 으로 부르면 그 직원이 답합니다. 예: @ceo 이번 주 진행 상황 알려줘' : '';
   const placeholder = meeting ? (conv.status === 'open' ? '회의에 의견을 남기세요. 특정 직원에게만 물으려면 @이름 (Enter 전송, Shift+Enter 줄바꿈)' : '끝난 회의입니다') : '메시지 (Enter 전송, Shift+Enter 줄바꿈)';
   const msgsEl = document.querySelector('#chatMain .msgs');
@@ -1319,7 +1319,7 @@ $('#meetStart').onclick = async () => {
     const r = await api('/api/meeting', { title: $('#meetTitle').value, agenda: $('#meetAgenda').value, participants });
     meetDlg.close(); $('#meetTitle').value = ''; $('#meetAgenda').value = '';
     await loadChat(); openConv(r.id);
-    toast('회의를 시작했습니다. 참석자들이 차례로 발언합니다');
+    toast('회의를 시작했습니다. 진행자가 먼저 답합니다');
   } catch (e) { toast(e.message, true); }
 };
 

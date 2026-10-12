@@ -10,6 +10,7 @@ import {
   ensureChannel,
   ensureDm,
   getConv,
+  meetingNextRound,
   ownerSpokeInMeeting,
   parseMentions,
   postMessage,
@@ -129,15 +130,22 @@ describe('메신저 실행', () => {
     assert.equal(calls().length, 3);
   });
 
-  it('회의: 진행자부터 차례로 발언하고, 종료하면 회의록을 남긴다', async () => {
-    const { paths, engine } = setup({ 'chat:hr': 'pass' });
+  it('회의: 진행자가 먼저 답하고, 한 바퀴 더는 모두 차례, 종료하면 회의록을 남긴다', async () => {
+    const { paths, engine, calls } = setup({ 'chat:hr': 'pass' });
     const conv = createMeeting(paths, { title: '우선순위', agenda: '무엇부터?', participants: ['worker', 'ceo', 'hr'], owner: 'owner', facilitator: 'ceo' });
     ownerSpokeInMeeting(paths, conv.id, [], AGENTS);
-    assert.deepEqual(getConv(paths, conv.id).queue, ['ceo', 'worker', 'hr']);
+    assert.deepEqual(getConv(paths, conv.id).queue, ['ceo'], '사용자가 지명하지 않으면 진행자만 답한다');
 
     await engine.runUntilIdle();
-    assert.deepEqual(readMessages(paths, conv.id).map((m) => m.from), ['owner', 'ceo', 'worker'], 'hr 은 패스');
+    assert.deepEqual(readMessages(paths, conv.id).map((m) => m.from), ['owner', 'ceo'], '진행자가 아무도 지명하지 않으면 다른 참석자는 실행되지 않는다');
+    assert.deepEqual(calls().map((c) => c.agent), ['ceo']);
     assert.deepEqual(getConv(paths, conv.id).queue, []);
+
+    // 사용자가 "한 바퀴 더"를 누르면 모두 차례가 오고, 할 말 없는 사람은 패스
+    meetingNextRound(paths, conv.id, AGENTS);
+    assert.deepEqual(getConv(paths, conv.id).queue, ['ceo', 'worker', 'hr']);
+    await engine.runUntilIdle();
+    assert.deepEqual(readMessages(paths, conv.id).map((m) => m.from), ['owner', 'ceo', 'ceo', 'worker'], 'hr 은 패스');
 
     // 사용자가 한 명만 부르면 그 사람만 답한다
     const msg = say(paths, conv.id, 'owner', '@worker 근거는?');
@@ -166,6 +174,32 @@ describe('메신저 실행', () => {
     await engine.runUntilIdle();
     const agentTurns = readMessages(paths, conv.id).filter((m) => m.from !== 'owner').length;
     assert.equal(agentTurns, 4, '참석자 2명 × 2회');
+  });
+
+  it('진행자가 @지명한 참석자만 이어서 발언한다', async () => {
+    const { paths, engine, calls } = setup({ 'chat:ceo': 'mention:hr' });
+    const conv = createMeeting(paths, { title: '채용', agenda: '사람이 더 필요한가', participants: ['ceo', 'worker', 'hr'], owner: 'owner', facilitator: 'ceo' });
+    ownerSpokeInMeeting(paths, conv.id, [], AGENTS);
+    await engine.runUntilIdle();
+    assert.deepEqual(readMessages(paths, conv.id).map((m) => m.from), ['owner', 'ceo', 'hr']);
+    assert.ok(!calls().some((c) => c.agent === 'worker'), '지명되지 않은 worker 는 실행되지 않는다');
+  });
+
+  it('회의 발언 프롬프트: 기본 패스, 사용자 미컨펌 방향을 전제로 계획하지 않음, 진행자는 필요한 사람만 지명', async () => {
+    const { paths, engine, calls } = setup({ 'chat:ceo': 'mention:worker' });
+    const conv = createMeeting(paths, { title: '새 서비스', agenda: '무엇을 만들까', participants: ['ceo', 'worker'], owner: 'owner', facilitator: 'ceo' });
+    ownerSpokeInMeeting(paths, conv.id, [], AGENTS);
+    await engine.runUntilIdle();
+    const [ceo, worker] = calls();
+    for (const c of [ceo, worker]) {
+      assert.match(c.prompt, /기본은 \(패스\)입니다/);
+      assert.match(c.prompt, /새 사실.*반대 근거.*직접 답/);
+      assert.match(c.prompt, /사용자가 아직 정하지\(컨펌하지\) 않은 방향을 확정된 것처럼 다루지 않습니다/);
+      assert.match(c.prompt, /역할 분담.*완료 조건.*채용 계획/);
+      assert.doesNotMatch(c.prompt, /자기 관점\(근거, 우려, 대안\)을 더합니다/);
+    }
+    assert.match(ceo.prompt, /진행자라 가장 먼저 발언합니다.*@이름 으로 지명/);
+    assert.doesNotMatch(worker.prompt, /진행자라 가장 먼저/);
   });
 });
 
