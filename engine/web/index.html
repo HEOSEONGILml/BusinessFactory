@@ -754,26 +754,45 @@ function renderInbox() {
         <button class="btn primary" data-open="${f.id}">결과 보기</button>
         <button class="btn" data-act="ack">확인 완료</button></div></div>`;
   }
-  // 5초마다·변경 이벤트마다 다시 그리므로, 쓰던 답변과 커서·펼침 상태를 보존한다.
+  // 5초마다·변경 이벤트마다 다시 그리므로, 쓰던 답변과 커서를 보존하고 펼침/접힘은 사용자가 정한 대로 되돌린다.
   const box = $('#inbox');
   if (box.dataset.html === h) return;
-  const keyOf = (card) => `${card.className}|${card.dataset.id}|${card.dataset.item ?? ''}`;
-  const drafts = new Map(), opened = new Set();
+  const drafts = new Map();
   let focus = null;
   box.querySelectorAll('.card').forEach((card) => {
     const ta = card.querySelector('textarea');
-    if (ta?.value) drafts.set(keyOf(card), ta.value);
-    if (ta && ta === document.activeElement) focus = { key: keyOf(card), start: ta.selectionStart, end: ta.selectionEnd, dir: ta.selectionDirection, scroll: ta.scrollTop };
-    card.querySelectorAll('details').forEach((d, i) => { if (d.open) opened.add(`${keyOf(card)}#${i}`); });
+    if (ta?.value) drafts.set(inboxKey(card), ta.value);
+    if (ta && ta === document.activeElement) focus = { key: inboxKey(card), start: ta.selectionStart, end: ta.selectionEnd, dir: ta.selectionDirection, scroll: ta.scrollTop };
   });
   box.innerHTML = h; box.dataset.html = h;
+  const present = new Set();
   box.querySelectorAll('.card').forEach((card) => {
-    const ta = card.querySelector('textarea'), k = keyOf(card);
+    const ta = card.querySelector('textarea'), k = inboxKey(card);
     if (ta && drafts.has(k)) ta.value = drafts.get(k);
-    card.querySelectorAll('details').forEach((d, i) => { if (opened.has(`${k}#${i}`)) d.open = true; });
+    card.querySelectorAll('details').forEach((d, i) => {
+      const dk = `${k}#${i}`;
+      present.add(dk);
+      if (inboxFolds.has(dk)) d.open = inboxFolds.get(dk);
+    });
     if (ta && focus?.key === k) { ta.focus({ preventScroll: true }); ta.setSelectionRange(focus.start, focus.end, focus.dir); ta.scrollTop = focus.scroll; }
   });
+  // Forget cards that left the inbox so the saved state stays small.
+  for (const dk of [...inboxFolds.keys()]) if (!present.has(dk)) inboxFolds.delete(dk);
+  saveInboxFolds();
 }
+
+// Open/closed state of each toggle in the inbox, as the owner left it. Survives re-renders and reloads.
+const inboxKey = (card) => `${card.className}|${card.dataset.id}|${card.dataset.item ?? ''}`;
+const inboxFolds = (() => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem('bf-inbox-folds') ?? '{}'))); } catch { return new Map(); } })();
+function saveInboxFolds() { try { localStorage.setItem('bf-inbox-folds', JSON.stringify(Object.fromEntries(inboxFolds))); } catch {} }
+// 'toggle' does not bubble, so listen in the capture phase.
+$('#inbox').addEventListener('toggle', (ev) => {
+  const d = ev.target, card = d.closest?.('.card');
+  if (!(d instanceof HTMLDetailsElement) || !card) return;
+  const i = [...card.querySelectorAll('details')].indexOf(d);
+  inboxFolds.set(`${inboxKey(card)}#${i}`, d.open);
+  saveInboxFolds();
+}, true);
 
 $('#inbox').addEventListener('click', (ev) => {
   const b = ev.target.closest('button, a[data-open]'); if (!b) return;
