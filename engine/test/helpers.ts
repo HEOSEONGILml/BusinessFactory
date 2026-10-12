@@ -6,6 +6,10 @@ import { DEFAULT_CONFIG } from '../src/config.ts';
 import type { Config } from '../src/config.ts';
 import { resolvePaths } from '../src/paths.ts';
 
+// Tests run inside employee runs too (npm test), where BF_COMPANY/BF_TASK/... point at the real
+// company. Drop them so nothing a test spawns can touch real data.
+for (const k of Object.keys(process.env)) if (k.startsWith('BF_')) delete process.env[k];
+
 export const AGENTS = ['ceo', 'hr', 'reviewer', 'worker'];
 
 /** A throwaway system root with the default employees defined. */
