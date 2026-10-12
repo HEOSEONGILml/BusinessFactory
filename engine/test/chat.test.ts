@@ -102,6 +102,21 @@ describe('메신저 실행', () => {
     assert.equal(readMessages(paths, dm.id).length, 2, '같은 메시지에 두 번 답하지 않는다');
   });
 
+  it('full_access 이면 대화 실행도 업무와 같은 권한(권한 검사 없음, 작업 공간 접근)으로 돈다', async () => {
+    const { paths, engine, calls } = setup({}, { full_access: true });
+    const dm = ensureDm(paths, 'owner', 'ceo');
+    say(paths, dm.id, 'owner', '오늘 한 일 알려줘');
+    await engine.runUntilIdle();
+    assert.equal(readMessages(paths, dm.id).length, 2);
+    const c = calls()[0];
+    assert.ok(!c.args.includes('--allowedTools'), '허용 목록으로 제한하지 않는다');
+    assert.equal(c.args[c.args.indexOf('--permission-mode') + 1], 'bypassPermissions');
+    assert.ok(c.args.includes(paths.workspaces), '작업 공간을 연다');
+    assert.equal(c.args[c.args.indexOf('--max-turns') + 1], String(DEFAULT_CONFIG.max_turns));
+    assert.match(c.prompt, /업무 실행과 같은 권한/);
+    assert.doesNotMatch(c.prompt, /파일을 고치거나 작업을 직접 하지 않습니다/);
+  });
+
   it('직원끼리 서로 부르는 대화는 연쇄 한도에서 멈춘다', async () => {
     const { paths, engine, calls } = setup({ 'chat:ceo': 'mention:worker', 'chat:worker': 'mention:ceo' }, {
       chat: { ...DEFAULT_CONFIG.chat, max_chain: 3 },

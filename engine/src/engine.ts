@@ -413,18 +413,26 @@ export class Engine {
 
   private buildChatSpec(conv: Conversation, agent: AgentInfo, mode: ChatMode): RunSpec {
     const chatDir = path.join(this.paths.company, 'chat');
-    // No workspaces in the messenger: secrets live there.
+    // Read-only mode keeps workspaces (secrets) out of the messenger; full_access adds them in talkSpec.
     return this.talkSpec(agent, 'chat', this.chatPrompt(conv, agent.name, mode), chatDir, [chatDir, this.paths.board, this.paths.memory], { BF_CHAT: conv.id });
   }
 
-  /** Talking is read-only: no file edits and no shell beyond bf. */
+  /**
+   * Messenger and comment runs. With full_access they run exactly like work runs: every tool the
+   * employee has, no permission checks, the whole company and its workspaces reachable, and the
+   * work-run turn/time limits. Without it, talking stays read-only (no edits, no shell beyond bf).
+   */
   private talkSpec(agent: AgentInfo, label: string, prompt: string, cwd: string, read: string[], env: Record<string, string>): RunSpec {
+    const full = this.config.full_access;
     const baseTools = agent.tools.length ? agent.tools : ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch'];
-    const talker: AgentInfo = {
-      ...agent,
-      tools: baseTools.filter((t) => !EDIT_TOOLS.has(t)),
-      permissions: agent.permissions.filter((p) => /^(WebSearch|WebFetch)\b/.test(p)),
-    };
+    const talker: AgentInfo = full
+      ? agent
+      : {
+          ...agent,
+          tools: baseTools.filter((t) => !EDIT_TOOLS.has(t)),
+          permissions: agent.permissions.filter((p) => /^(WebSearch|WebFetch)\b/.test(p)),
+        };
+    const dirs = full ? [...new Set([...read, this.paths.workspaces, this.paths.root])] : read;
     const agentsFile = path.join(this.paths.company, '.run', `${label}-${agent.name}.json`);
     fs.mkdirSync(path.dirname(agentsFile), { recursive: true });
     const def: Record<string, unknown> = { description: agent.description || agent.name, prompt: agent.prompt };
@@ -439,11 +447,12 @@ export class Engine {
       agentsFile,
       prompt,
       cwd,
-      access: { write: [], read },
+      access: full ? { write: dirs, read: [] } : { write: [], read },
       grants: [],
+      fullAccess: full,
       handbook: fs.existsSync(this.paths.handbook) ? this.paths.handbook : null,
-      maxTurns: this.config.chat.max_turns,
-      timeoutMs: this.config.chat.timeout_minutes * 60_000,
+      maxTurns: full ? Math.max(this.config.chat.max_turns, this.config.max_turns) : this.config.chat.max_turns,
+      timeoutMs: (full ? Math.max(this.config.chat.timeout_minutes, this.config.run_timeout_minutes) : this.config.chat.timeout_minutes) * 60_000,
       binDir: this.paths.bin,
       env: {
         BF_ROOT: this.paths.root,
@@ -549,8 +558,9 @@ export class Engine {
       '사용자의 마지막 코멘트에 코멘트로 답하세요.',
       '- 최종 출력은 코멘트 본문 그대로입니다. 인사말, 서명, 따옴표 없이 씁니다.',
       '- 질문에는 직접 답하고, 사용자의 말을 어떻게 이해했는지와 그래서 무엇을 할지 짧고 구체적으로 씁니다. 필요한 것이 더 있으면 물어봅니다.',
-      `- 사실 확인이 필요하면 \`bf task show ${task.id}\` 와 파일 읽기로 확인합니다. 추측은 추측이라고 밝힙니다.`,
-      '- **사용자가 일을 부탁하거나 지시하면 (이 업무가 끝난 뒤라도) 그 자리에서 업무로 등록합니다.** 버튼을 누르라거나 새 목표를 따로 만들라고 되돌려 보내지 않습니다:',
+      `- 사실 확인이 필요하면 \`bf task show ${task.id}\` 와 파일 읽기${this.config.full_access ? ', 셸 명령(git log 등)' : ''}로 직접 확인합니다. 추측은 추측이라고 밝힙니다.`,
+      ...this.directWorkLines(),
+      `- **사용자가 일을 부탁하거나 지시하면 (이 업무가 끝난 뒤라도)** ${this.config.full_access ? "바로 끝낼 수 없는 일은 " : ""}그 자리에서 업무로 등록합니다. 버튼을 누르라거나 새 목표를 따로 만들라고 되돌려 보내지 않습니다:`,
       '  `bf chat task --title "<할 일 한 문장>" --desc "<배경, 요청 내용, 참고 경로>" --done-when "<검수자가 파일만 보고 판정할 조건>" [--to <직원>] [--workspace <작업 공간>] [--no-review]`',
       '  - 담당: 내 직무면 생략(자신), 다른 직무면 --to <직원>, 여러 단계·여러 직무가 필요한 큰 일이면 --to ceo. 작업 공간은 생략하면 이 업무의 것을 씁니다.',
       '  - 등록했으면 코멘트에 업무 번호와 무엇을 하기로 했는지 한두 문장으로 알립니다. 끝나면 결과가 이 코멘트에 자동으로 올라온다고 덧붙입니다.',
@@ -584,6 +594,16 @@ export class Engine {
     this.commit(`${taskId} ${agent}: 코멘트`);
   }
 
+  /** With full_access, messenger and comment runs may do the work themselves. */
+  private directWorkLines(): string[] {
+    if (!this.config.full_access) return [];
+    return [
+      '- 당신은 이 대화에서도 업무 실행과 같은 권한을 가집니다: 모든 도구와 셸 명령, 회사 폴더와 모든 작업 공간(' + this.paths.workspaces + ')을 읽고 고칠 수 있습니다. 권한이 막혀서 못 한다고 답하지 않습니다.',
+      '- 확인·조회·짧은 수정처럼 몇 분 안에 끝나는 일은 직접 하고, 무엇을 했는지(바꾼 파일, 커밋)를 답에 적습니다. 결재 대상(돈, 외부 공개, 계정, 삭제)은 직접 하지 않고 업무로 등록해 결재를 받습니다.',
+      '- 여러 단계이거나 오래 걸리거나 검수가 필요한 일은 직접 하지 말고 아래처럼 업무로 등록합니다(진행·검수 기록을 남기기 위해).',
+    ];
+  }
+
   private chatPrompt(conv: Conversation, agent: string, mode: ChatMode): string {
     const staff = listAgents(this.paths).map((a) => `${a.name}(${a.description})`).join(', ');
     const where =
@@ -613,8 +633,11 @@ export class Engine {
         mode === 'meeting' ? '지금 당신의 발언 차례입니다. 앞사람들의 의견을 보고 이어서 말하세요.' : '이 대화에 답장하세요.',
         '- 최종 출력은 보낼 메시지 본문 그대로입니다. 인사말, 서명, 따옴표 없이 씁니다.',
         '- 대화체로 짧고 구체적으로 씁니다. 보통 2~6문장입니다. 동의만 반복하지 말고 자기 관점(근거, 우려, 대안)을 더합니다.',
-        '- 사실 확인이 필요하면 bf task list / bf task show / bf memory show 와 파일 읽기로 확인합니다. 추측은 추측이라고 밝힙니다.',
-        '- 메신저에서는 파일을 고치거나 작업을 직접 하지 않습니다. 대신 **사용자가 일을 부탁하거나 지시하면** 그 자리에서 업무로 등록합니다:',
+        `- 사실 확인이 필요하면 bf task list / bf task show / bf memory show 와 파일 읽기${this.config.full_access ? ', 셸 명령(git log 등)' : ''}로 직접 확인합니다. 추측은 추측이라고 밝힙니다.`,
+        ...this.directWorkLines(),
+        this.config.full_access
+          ? '- **사용자가 일을 부탁하거나 지시했는데 바로 끝낼 수 없는 일이면** 그 자리에서 업무로 등록합니다:'
+          : '- 메신저에서는 파일을 고치거나 작업을 직접 하지 않습니다. 대신 **사용자가 일을 부탁하거나 지시하면** 그 자리에서 업무로 등록합니다:',
         '  `bf chat task --title "<할 일 한 문장>" --desc "<배경, 요청 내용, 참고 경로>" --done-when "<검수자가 파일만 보고 판정할 조건>" [--to <직원>] [--workspace <작업 공간>] [--no-review]`',
         '  - 담당: 내 직무면 생략(자신), 다른 직무면 --to <직원>, 여러 단계·여러 직무가 필요한 큰 일이면 --to ceo.',
         '  - 문구 수정처럼 작고 확인이 쉬운 일만 --no-review 를 붙입니다. 코드·작업 공간을 고치는 일은 --workspace 를 지정합니다.',

@@ -30,7 +30,7 @@ export interface Config {
    * Leaves room for the owner's own Claude use. Windows: five_hour, seven_day.
    */
   usage_ceiling: Record<string, number>;
-  /** Messenger and meetings: replies run as short, read-only employee runs. */
+  /** Messenger and meetings: replies run as short employee runs (read-only unless full_access). */
   chat: {
     max_concurrency: number;
     /** Agent-to-agent reply chains stop after this many hops. */
@@ -53,7 +53,7 @@ export interface Config {
   default_model: string | null;
   /**
    * Work and review runs skip every permission check (bypassPermissions) instead of the
-   * path-scoped allow list. Chat stays read-only.
+   * path-scoped allow list. Messenger and comment replies then run with the same full access.
    */
   full_access: boolean;
   /**
