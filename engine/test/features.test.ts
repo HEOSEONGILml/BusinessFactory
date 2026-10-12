@@ -189,7 +189,8 @@ describe('회사 설립', () => {
     assert.deepEqual(listAgents(paths).map((a) => a.name), ['ceo', 'hr', 'reviewer', 'worker']);
     assert.match(fs.readFileSync(paths.handbook, 'utf8'), /# 직원 핸드북/);
     const ceo = listAgents(paths).find((a) => a.name === 'ceo')!;
-    assert.equal(ceo.model, 'opus');
+    assert.equal(ceo.model, 'claude-opus-5-5');
+    assert.match(fs.readFileSync(paths.config, 'utf8'), /full_access: true/);
     assert.ok(ceo.prompt.includes('CEO'));
   });
 });

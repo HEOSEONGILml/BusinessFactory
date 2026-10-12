@@ -57,11 +57,12 @@ BusinessFactory/              시스템 (이 git 레포)
 | 직원 | 역할 | 모델 |
 |---|---|---|
 | 사용자 (owner) | 목표 지시, 결재 | - |
-| ceo | 목표 → 계획 → 업무 분해·배정 → 결과 취합 → 보고 | opus |
-| hr | 필요한 직무의 직원 정의(채용안) 작성 | opus |
-| reviewer | 결과물이 완료 조건을 충족하는지 검수, 미달 시 반려 | sonnet |
-| 실무진 | 실제 작업. 처음엔 범용 실무자 1명, 이후 필요 시 채용 | sonnet |
+| ceo | 목표 → 계획 → 업무 분해·배정 → 결과 취합 → 보고 | claude-opus-5-5 |
+| hr | 필요한 직무의 직원 정의(채용안) 작성 | claude-opus-5-5 |
+| reviewer | 결과물이 완료 조건을 충족하는지 검수, 미달 시 반려 | claude-opus-5-5 |
+| 실무진 | 실제 작업. 처음엔 범용 실무자 1명, 이후 필요 시 채용 | claude-opus-5-5 |
 
+- `bf init`으로 만든 회사는 `full_access: true`, `default_model: claude-opus-5-5`로 시작한다. 견본 핸드북과 직원 정의도 이 모드에 맞춰 쓰여 있다.
 - 위임 깊이 제한: 기본 3 (`config.yaml`의 `max_depth`).
 - 직원 정의는 Claude Code 하위 에이전트 형식(`company/staff/<name>.md`). 엔진이 실행마다 `--agents` 파일로 넘긴다.
   - `tools`: 쓸 수 있는 도구 종류

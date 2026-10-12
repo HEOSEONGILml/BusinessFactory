@@ -23,6 +23,9 @@ const SCHEDULES_TEMPLATE = `# 정기 업무. 엔진이 시각에 맞춰 목표�
 schedules: []
 `;
 
+/** A new company runs as the templates (handbook, staff) are written: full access, one model for everyone. */
+const NEW_COMPANY_CONFIG = { full_access: true, default_model: 'claude-opus-5-5' };
+
 /** Creates the company data folder from templates. Safe to re-run: never overwrites existing files. */
 export function initCompany(paths: Paths, opts: { git: boolean }): InitResult {
   const created: string[] = [];
@@ -34,7 +37,7 @@ export function initCompany(paths: Paths, opts: { git: boolean }): InitResult {
   }
 
   const files: Record<string, string> = {
-    [paths.config]: '# 회사 설정. 비어 있는 항목은 기본값을 따른다.\n' + YAML.stringify({ ...DEFAULT_CONFIG, project_priority: {} }),
+    [paths.config]: '# 회사 설정. 비어 있는 항목은 기본값을 따른다.\n' + YAML.stringify({ ...DEFAULT_CONFIG, project_priority: {}, ...NEW_COMPANY_CONFIG }),
     [path.join(paths.company, 'schedules.yaml')]: SCHEDULES_TEMPLATE,
     [path.join(paths.memory, 'index.md')]: '# 회사 기억 목차\n',
     [path.join(paths.company, '.gitignore')]: '.lock\n.engine/\n.engine-schedule.json\n.engine-notified.json\n.engine-usage.json\n.engine-state.json\n.engine-heartbeat.json\nboard/attachments/\n.web-password\nengine.log\n.run/\n*.tmp\n',
