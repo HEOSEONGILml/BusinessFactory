@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Board, BoardError, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
-import { dmId, ensureDm, ensureMissionChannel, postMessage } from './chat.ts';
+import { dmId, ensureDm, ensureMissionChannel, postMessage, withDecisions } from './chat.ts';
 import type { Config } from './config.ts';
 import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.ts';
 import { withLock, writeFileAtomic } from './fsutil.ts';
@@ -169,7 +169,7 @@ function shareInChannel(paths: Paths, id: string, heading: string, lines: string
   try {
     const m = missionExists(paths, id) ? readMission(paths, id).mission : null;
     const conv = ensureMissionChannel(paths, id, m?.title ?? null, m?.project ?? null);
-    const body = clip(lines.join('\n').trim(), 1500);
+    const body = withDecisions(lines.join('\n').trim(), 3000);
     postMessage(paths, conv.id, 'ceo', `🎯 **${id} ${heading}**${body ? `\n\n${body}` : ''}`, { chain: 99, kind: 'system' });
   } catch {
     // sharing is best-effort; the journal keeps the record
@@ -642,7 +642,7 @@ export class MissionLoop {
       `- 제목: ${step.title}`,
       `- 실행 ${runs}회, 추정 ${fmtUsd(cost)}, 하위 업무 완료 ${doneKids}/${desc.length}`,
       ...(step.mission_proposal ? [`- ${step.mission_proposal.kind === 'achieve' ? '달성 제안' : '진전 없음 선언'}: ${step.mission_proposal.text}`] : []),
-      `- 보고: ${clip(summary || '(없음)', 1500)}`,
+      `- 보고: ${withDecisions(summary || '(없음)', 1500)}`,
       `- 다음: ${next || '(없음)'}`,
     ]);
     this.d.log(`미션 ${m.id} 단계 ${n} (${step.id}) ${STATUS_LABEL[step.status]}`);

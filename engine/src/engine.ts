@@ -11,6 +11,7 @@ import type { Paths } from './paths.ts';
 import { agentToolList, isUsageLimit, parseResetTime, runAgent } from './runner.ts';
 import {
   channelForTask,
+  withDecisions,
   dueReplies,
   getConv,
   listConvs,
@@ -367,7 +368,7 @@ export class Engine {
           const head = `${t.id}${t.parent ? ` (${t.parent} 하위)` : ''} — ${t.title} · ${t.assignee}`;
           const text =
             t.status === 'done'
-              ? `✅ **완료** ${head}\n\n${truncate(lastLogEntry(log, '완료보고') || '(요약 없음)', n)}`
+              ? `✅ **완료** ${head}\n\n${withDecisions(lastLogEntry(log, '완료보고') || '(요약 없음)', n)}`
               : t.status === 'failed'
                 ? `❌ **실패** ${head}\n\n${truncate(lastLogEntry(log, '실패') || '(사유 없음)', n)}`
                 : `🚫 **취소** ${head}`;

@@ -216,3 +216,14 @@ describe('bf chat 명령', () => {
     assert.equal(readMessages(paths, 'c-blindcandle')[0].chain, 1, '직원 글은 이미 연쇄 1단계');
   });
 });
+
+describe('채널 공유 요약', () => {
+  it('길면 자르되 결정·근거 줄은 항상 남긴다', async () => {
+    const { withDecisions } = await import('../src/chat.ts');
+    const long = '결론 먼저.\n' + '가'.repeat(2000) + '\n- 결정: A안 채택 / 근거: 비용이 B안의 절반\n다음: 배포';
+    const out = withDecisions(long, 400);
+    assert.ok(out.length < 800);
+    assert.match(out, /결정: A안 채택 \/ 근거: 비용이 B안의 절반/);
+    assert.equal(withDecisions('짧음', 400), '짧음');
+  });
+});

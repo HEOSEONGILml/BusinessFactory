@@ -113,6 +113,25 @@ export function channelForTask(paths: Paths, task: { mission?: string | null; pr
   return ensureChannel(paths, 'general');
 }
 
+/**
+ * A summary for the channel: cut to n characters, but the `결정: … / 근거: …` lines always survive
+ * (the owner wants every decision shared with its reason).
+ */
+export function withDecisions(summary: string, n: number): string {
+  if (summary.length <= n) return summary;
+  const decisions = summary
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^([-*]\s*)?(\*\*)?(결정|근거)(\*\*)?\s*[:：]/.test(l));
+  const tail = decisions.join('\n');
+  return decisions.length ? `${cut(summary, Math.max(200, n - tail.length))}\n${cut(tail, 1500)}` : cut(summary, n);
+}
+
+function cut(s: string, n: number): string {
+  const t = s.trim();
+  return t.length > n ? t.slice(0, n) + '…' : t;
+}
+
 export function dmId(a: string, b: string): string {
   const [x, y] = [a, b].sort();
   return `d-${x}--${y}`;
