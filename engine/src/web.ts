@@ -15,6 +15,8 @@ import {
   ensureChannel,
   ensureDm,
   ensureMissionChannel,
+  ensureProjectChannel,
+  projectOf,
   getConv,
   lastMessage,
   listConvs,
@@ -262,13 +264,11 @@ export function missionsState(board: Board, paths: Paths) {
 /** Conversation list for the messenger sidebar; #general and one channel per project always exist. */
 function chatList(board: Board, paths: Paths) {
   ensureChannel(paths, 'general');
-  for (const p of new Set(board.list().map((t) => t.project).filter(Boolean) as string[])) {
-    try {
-      ensureChannel(paths, p, p);
-    } catch {
-      // project names that cannot be channel names simply get no channel
-    }
-  }
+  const workspaces = fs.existsSync(paths.workspaces)
+    ? fs.readdirSync(paths.workspaces, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name)
+    : [];
+  // Every project and every workspace has a channel; names that cannot be channel names simply get none.
+  for (const p of new Set([...workspaces, ...(board.list().map(projectOf).filter(Boolean) as string[])])) ensureProjectChannel(paths, p);
   for (const m of listMissions(paths)) {
     try {
       ensureMissionChannel(paths, m.id, m.title, m.project);

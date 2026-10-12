@@ -11,6 +11,10 @@ import type { Paths } from './paths.ts';
 import { agentToolList, isUsageLimit, parseResetTime, runAgent } from './runner.ts';
 import {
   channelForTask,
+  ensureMissionChannel,
+  ensureProjectChannel,
+  linkProjectToMission,
+  projectOf,
   withDecisions,
   dueReplies,
   getConv,
@@ -350,13 +354,26 @@ export class Engine {
   }
 
   /**
-   * Every task that ends is shared briefly in its channel (mission → #m001, project → #project,
-   * otherwise #general). Mission steps are covered by the mission journal, which is shared too.
+   * Every task that ends is shared briefly in its channel. Project work (a project or a workspace)
+   * goes to the project's channel even inside a mission; other mission work to the mission channel
+   * (#m001); the rest to #general. The mission channel keeps the big picture: its journal, the
+   * one-time "new project" notice, and a one-line pointer when project work fails.
+   * Mission steps are covered by the mission journal. Every workspace and project gets a channel.
    * Tasks that ended before this feature existed (company/chat/.announce-since) are skipped.
    */
   private announceWork(): void {
     const since = this.announceSince();
+    this.ensureProjectChannels();
     for (const t of this.board.list()) {
+      const project = projectOf(t);
+      if (project && t.mission && !this.linkedProjects.has(`${t.mission}/${project}`)) {
+        try {
+          linkProjectToMission(this.paths, project, t.mission);
+        } catch (e) {
+          this.log(`${t.id} 프로젝트 채널을 미션에 잇지 못함: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        this.linkedProjects.add(`${t.mission}/${project}`);
+      }
       if (t.announced || !isTerminal(t.status) || t.updated_at < since) continue;
       try {
         const step = t.parent === null && !!t.mission;
@@ -374,11 +391,43 @@ export class Engine {
                 : `🚫 **취소** ${head}`;
           const from = t.assignee === this.config.owner ? t.created_by : t.assignee;
           postMessage(this.paths, conv.id, from, text, { chain: this.config.chat.max_chain, kind: 'system' });
+          // A failure in a mission's project is big-picture news: point at it from the mission channel.
+          if (t.status === 'failed' && t.mission && conv.id !== `c-${t.mission.toLowerCase()}`) {
+            const mc = ensureMissionChannel(this.paths, t.mission);
+            postMessage(this.paths, mc.id, 'ceo', `❌ ${conv.title} 에서 ${t.id} 실패 — ${truncate(t.title, 80)} (상세는 ${conv.title})`, { chain: 99, kind: 'system' });
+          }
         }
       } catch (e) {
         this.log(`${t.id} 결과를 채널에 공유하지 못함: ${e instanceof Error ? e.message : String(e)}`);
       }
       this.board.markAnnounced(t.id);
+    }
+  }
+
+  /** mission/project pairs already linked in this process (the channel file remembers it across restarts). */
+  private linkedProjects = new Set<string>();
+  private knownProjects = new Set<string>();
+
+  /** Every workspace folder and every project named on a task has its channel (#fortune). */
+  private ensureProjectChannels(): void {
+    const names = new Set<string>();
+    if (fs.existsSync(this.paths.workspaces)) {
+      for (const d of fs.readdirSync(this.paths.workspaces, { withFileTypes: true })) {
+        if (d.isDirectory() && !d.name.startsWith('.')) names.add(d.name);
+      }
+    }
+    for (const t of this.board.list()) {
+      const p = projectOf(t);
+      if (p) names.add(p);
+    }
+    for (const name of names) {
+      if (this.knownProjects.has(name)) continue;
+      try {
+        ensureProjectChannel(this.paths, name);
+      } catch {
+        // best-effort
+      }
+      this.knownProjects.add(name);
     }
   }
 

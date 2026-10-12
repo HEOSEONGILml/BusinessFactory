@@ -30,6 +30,8 @@ export interface Conversation {
   /** Meetings: agent turns used since the owner last spoke (caps runaway discussion). */
   turns_since_owner?: number;
   notes_file?: string | null;
+  /** Project channels: missions already told that this project is part of them (told once each). */
+  missions?: string[];
 }
 
 export interface Message {
@@ -100,16 +102,51 @@ export function ensureMissionChannel(paths: Paths, missionId: string, title?: st
   return conv;
 }
 
-/** Where a task's progress is shared: its mission's channel, else its project's channel, else #general. */
-export function channelForTask(paths: Paths, task: { mission?: string | null; project: string | null }): Conversation {
-  if (task.mission) return ensureMissionChannel(paths, task.mission);
-  if (task.project) {
-    try {
-      return ensureChannel(paths, task.project, task.project);
-    } catch {
-      // project names that cannot be channel names share in #general
-    }
+/** The project a task belongs to: its project, else the workspace it works in. */
+export function projectOf(task: { project: string | null; workspace?: string | null }): string | null {
+  return task.project ?? task.workspace ?? null;
+}
+
+/** The project's channel (#blindcandle); null when the name cannot be a channel name. */
+export function ensureProjectChannel(paths: Paths, name: string): Conversation | null {
+  try {
+    return ensureChannel(paths, name, name);
+  } catch {
+    return null;
   }
+}
+
+/**
+ * A project worked on for a mission: make sure its channel exists and tell the mission channel once
+ * that the project's details live there. Returns true when the announcement was posted now.
+ */
+export function linkProjectToMission(paths: Paths, project: string, missionId: string): boolean {
+  const conv = ensureProjectChannel(paths, project);
+  if (!conv) return false;
+  const missions = conv.missions ?? [];
+  if (missions.includes(missionId)) return false;
+  conv.missions = [...missions, missionId];
+  saveConv(paths, conv);
+  const mc = ensureMissionChannel(paths, missionId);
+  postMessage(paths, mc.id, 'ceo', `🧭 **새 프로젝트 ${conv.title} 시작** — 이 미션의 프로젝트 상세(업무별 완료 보고)는 ${conv.title} 에서 공유합니다. 이 채널에는 단계·진행 기록 같은 큰 흐름만 올립니다.`, {
+    chain: 99,
+    kind: 'system',
+  });
+  postMessage(paths, conv.id, 'ceo', `🧭 이 프로젝트는 미션 ${mc.title} 에서 파생됐습니다. 큰 흐름은 ${mc.title.split(' ')[0]} 에서 봅니다.`, { chain: 99, kind: 'system' });
+  return true;
+}
+
+/**
+ * Where a task's details are shared: its project's channel (even for mission work — the mission
+ * channel keeps only the big picture), else its mission's channel, else #general.
+ */
+export function channelForTask(paths: Paths, task: { mission?: string | null; project: string | null; workspace?: string | null }): Conversation {
+  const project = projectOf(task);
+  if (project) {
+    const conv = ensureProjectChannel(paths, project);
+    if (conv) return conv;
+  }
+  if (task.mission) return ensureMissionChannel(paths, task.mission);
   return ensureChannel(paths, 'general');
 }
 

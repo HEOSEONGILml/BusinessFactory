@@ -113,6 +113,45 @@ describe('미션 루프', () => {
     assert.match(JSON.parse(fs.readFileSync(path.join(paths.company, 'chat', 'c-m001.json'), 'utf8')).title, /#m001 · MAU 1000/);
   });
 
+  it('미션의 프로젝트 업무 상세는 프로젝트 채널로, 미션 채널에는 큰 흐름(기록·새 프로젝트 안내·가리키는 줄)만 간다', async () => {
+    const { engine, paths } = setup({ ceo: 'step', worker: 'done', reviewer: 'pass' }, {}, { FAKE_ACHIEVE_AT: '1' });
+    createMission(paths, 'owner', { title: 'MAU 1000', brief: 'b', project: 'shop' }, new Date());
+    await engine.runUntilIdle();
+    engine.tick();
+    const mission = readMessages(paths, 'c-m001', 500);
+    const shop = readMessages(paths, 'c-shop', 500);
+    assert.ok(shop.some((x) => /✅ \*\*완료\*\* T\d+ \(T0001 하위\)/.test(x.text)), '하위 업무 상세는 프로젝트 채널로');
+    assert.ok(!mission.some((x) => /✅ \*\*완료\*\*/.test(x.text)), '미션 채널에는 업무별 상세가 없다');
+    assert.equal(mission.filter((x) => /새 프로젝트 #shop 시작/.test(x.text)).length, 1, '새 프로젝트 안내는 한 번');
+    assert.ok(mission.some((x) => /단계 1 · T0001 · 완료/.test(x.text) && /프로젝트 #shop: 업무 1건 \(완료 1\).*상세는 #shop/.test(x.text)), '단계 기록이 프로젝트 채널을 가리킨다');
+    assert.ok(shop.some((x) => /미션 #m001/.test(x.text)), '프로젝트 채널에도 어느 미션에서 왔는지');
+    assert.ok([...mission, ...shop].every((x) => x.kind === 'system'));
+  });
+
+  it('작업 공간만 있는 미션 업무도 프로젝트 채널로 가고, 작업 공간 폴더마다 채널이 생긴다', () => {
+    const { engine, board, paths } = setup({});
+    fs.mkdirSync(path.join(paths.workspaces, 'fortune'), { recursive: true });
+    fs.mkdirSync(path.join(paths.company, 'chat'), { recursive: true });
+    fs.writeFileSync(path.join(paths.company, 'chat', '.announce-since'), '2000-01-01T00:00:00.000Z\n');
+    createMission(paths, 'owner', { title: 'm', brief: 'b' }, new Date());
+    const step = board.createTask('owner', { title: '[M001] 단계 1', assignee: 'ceo', doneWhen: DONE_WHEN, parent: null, mission: 'M001' });
+    const ws = board.createTask('ceo', { title: '앱 수정', assignee: 'worker', doneWhen: DONE_WHEN, parent: step.id, workspace: 'blindcandle' });
+    const plain = board.createTask('ceo', { title: '시장 조사', assignee: 'worker', doneWhen: DONE_WHEN, parent: step.id });
+    for (const t of [ws, plain]) {
+      board.start(t.id);
+      board.finishRun(t.id, '막힘');
+    }
+    engine.tick();
+    assert.ok(fs.existsSync(path.join(paths.company, 'chat', 'c-fortune.json')), '작업 공간 fortune 채널 자동 생성');
+    const bc = readMessages(paths, 'c-blindcandle', 500);
+    const mission = readMessages(paths, 'c-m001', 500);
+    assert.ok(bc.some((x) => x.text.includes(`❌ **실패** ${ws.id}`)));
+    assert.ok(mission.some((x) => x.text.includes(`❌ **실패** ${plain.id}`)), '작업 공간 없는 미션 업무는 미션 채널');
+    assert.ok(!mission.some((x) => x.text.includes(`**실패** ${ws.id}`)));
+    assert.ok(mission.some((x) => x.text.includes(`#blindcandle 에서 ${ws.id} 실패`)), '프로젝트 실패는 미션 채널에 한 줄로');
+    assert.ok(mission.some((x) => /새 프로젝트 #blindcandle 시작/.test(x.text)));
+  });
+
   it('미션이 아닌 업무는 프로젝트 채널(없으면 #general)에 결과가 한 번만 공유된다', async () => {
     const { engine, board, paths } = setup({ worker: 'done', reviewer: 'pass' });
     const a = board.createTask('owner', { title: '일반 목표', assignee: 'worker', doneWhen: DONE_WHEN, parent: null });

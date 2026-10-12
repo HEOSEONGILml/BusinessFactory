@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Board, BoardError, isTerminal, lastLogEntry, STATUS_LABEL } from './board.ts';
 import type { Task } from './board.ts';
-import { dmId, ensureDm, ensureMissionChannel, postMessage, withDecisions } from './chat.ts';
+import { dmId, ensureDm, ensureMissionChannel, postMessage, projectOf, withDecisions } from './chat.ts';
 import type { Config } from './config.ts';
 import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.ts';
 import { withLock, writeFileAtomic } from './fsutil.ts';
@@ -156,6 +156,24 @@ export function updateMission(paths: Paths, id: string, now: Date, fn: (doc: Mis
 export function readJournal(paths: Paths, id: string): string {
   const file = journalFile(paths, id);
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
+/**
+ * One line per project the step's subtasks worked in, pointing at its channel, so the mission
+ * channel shows where the details are without repeating them.
+ */
+export function projectPointers(tasks: Task[]): string[] {
+  const by = new Map<string, Task[]>();
+  for (const t of tasks) {
+    const p = projectOf(t);
+    if (p) by.set(p, [...(by.get(p) ?? []), t]);
+  }
+  return [...by].map(([p, ts]) => {
+    const done = ts.filter((t) => t.status === 'done');
+    const failed = ts.filter((t) => t.status === 'failed').length;
+    const titles = done.slice(0, 3).map((t) => `${t.id} ${t.title.length > 40 ? t.title.slice(0, 40) + '…' : t.title}`);
+    return `- 프로젝트 #${p.toLowerCase()}: 업무 ${ts.length}건 (완료 ${done.length}${failed ? `, 실패 ${failed}` : ''})${titles.length ? ` — ${titles.join(', ')}${done.length > 3 ? ' 외' : ''}` : ''} · 상세는 #${p.toLowerCase()}`;
+  });
 }
 
 export function appendJournal(paths: Paths, id: string, now: Date, heading: string, lines: string[] = []): void {
@@ -642,6 +660,7 @@ export class MissionLoop {
       `- 제목: ${step.title}`,
       `- 실행 ${runs}회, 추정 ${fmtUsd(cost)}, 하위 업무 완료 ${doneKids}/${desc.length}`,
       ...(step.mission_proposal ? [`- ${step.mission_proposal.kind === 'achieve' ? '달성 제안' : '진전 없음 선언'}: ${step.mission_proposal.text}`] : []),
+      ...projectPointers(desc),
       `- 보고: ${withDecisions(summary || '(없음)', 1500)}`,
       `- 다음: ${next || '(없음)'}`,
     ]);
