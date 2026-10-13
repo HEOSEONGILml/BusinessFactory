@@ -918,7 +918,7 @@ function renderBoard() {
   const tasks = state.tasks, byParent = {};
   for (const t of tasks) (byParent[t.parent ?? 'root'] ??= []).push(t);
   const showDone = $('#showDone').checked;
-  const goals = (byParent.root ?? []).filter((g) => showDone || !terminal(g.status) || !g.acknowledged)
+  const goals = (byParent.root ?? []).filter((g) => showDone || !terminal(g.status) || (!g.acknowledged && g.status !== 'canceled'))
     .sort((a, b) => terminal(a.status) - terminal(b.status) || b.id.localeCompare(a.id));
   const chip = (t) => `<span class="chip s-${t.status}">${esc(t.label)}</span>`;
   const rows = (pid, depth) => (byParent[pid] ?? []).map((t) => `
