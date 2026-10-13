@@ -69,6 +69,7 @@ section.panel { background: var(--panel); border: 1px solid var(--line); border-
 .panel > h2 { margin: 0; font-size: 16px; font-weight: 800; padding: 13px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; letter-spacing: -.2px; }
 .panel > h2 .count { background: var(--bad); color: #fff; border-radius: 999px; padding: 0 9px; font-size: 13px; line-height: 22px; }
 .panel > h2 .spacer { flex: 1; }
+.panel > h2 .opt { font-weight: 600; font-size: 14px; color: var(--muted); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .panel > h2 .sub { color: var(--faint); font-weight: 500; font-size: 13.5px; }
 .panel-body { padding: 16px 18px; }
 .empty { color: var(--faint); text-align: center; padding: 24px 0; font-size: 15px; }
@@ -153,6 +154,16 @@ details.hire summary { cursor: pointer; font-weight: 700; }
 .s-done { background: var(--ok-soft); color: var(--ok); }
 .s-failed { background: var(--bad-soft); color: var(--bad); }
 .s-canceled, .s-awaiting_approval { background: var(--idle-soft); color: var(--faint); }
+
+/* 제목만 보기: 처리할 일은 카드 종류·제목만, 업무 현황은 최상위 목표 줄만 남긴다. */
+#inbox.compact .card > :not(.kind):not(.title) { display: none; }
+#inbox.compact .card { padding: 10px 14px; cursor: pointer; }
+#inbox.compact .card .title { margin: 2px 0 0; font-size: 15px; }
+#inbox.compact .card:hover { background: var(--bg); }
+#inbox.compact.stack > * + * { margin-top: 8px; }
+#board.compact .trow, #board.compact .goal-head .tags, #board.compact .goal-head .live { display: none; }
+#board.compact .goal + .goal { margin-top: 8px; }
+#board.compact .goal-head { padding: 9px 14px; }
 
 /* ---------- board ---------- */
 .goal { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -366,7 +377,8 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
   <div class="grid">
     <div class="stack">
       <section class="panel">
-        <h2>처리할 일 <span class="count" id="inboxCount" hidden></span></h2>
+        <h2>처리할 일 <span class="count" id="inboxCount" hidden></span><span class="spacer"></span>
+          <label class="opt" title="카드를 제목만 보이게 접습니다. 접힌 카드를 누르면 자세히 봅니다"><input type="checkbox" data-compact="inbox"> 제목만</label></h2>
         <div class="panel-body stack" id="inbox"></div>
       </section>
       <section class="panel">
@@ -380,7 +392,8 @@ nav.views button.on { background: var(--accent-soft); color: var(--accent); }
 
     <section class="panel">
       <h2>업무 현황 <span class="spacer"></span>
-        <label style="font-weight:600;font-size:14px;color:var(--muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="showDone"> 끝난 목표도 보기</label>
+        <label class="opt" title="하위 업무를 숨기고 최상위 목표 제목만 보입니다"><input type="checkbox" data-compact="board"> 제목만</label>
+        <label class="opt"><input type="checkbox" id="showDone"> 끝난 목표도 보기</label>
       </h2>
       <div class="panel-body" id="board"></div>
     </section>
@@ -853,7 +866,19 @@ $('#inbox').addEventListener('toggle', (ev) => {
   saveInboxFolds();
 }, true);
 
+// '제목만' 토글: 처리할 일·업무 현황을 접는다. 선택은 브라우저에 기억한다.
+document.querySelectorAll('input[data-compact]').forEach((cb) => {
+  const key = `bf-compact-${cb.dataset.compact}`, box = $(`#${cb.dataset.compact}`);
+  try { cb.checked = localStorage.getItem(key) === '1'; } catch {}
+  box.classList.toggle('compact', cb.checked);
+  cb.addEventListener('change', () => {
+    box.classList.toggle('compact', cb.checked);
+    try { localStorage.setItem(key, cb.checked ? '1' : '0'); } catch {}
+  });
+});
 $('#inbox').addEventListener('click', (ev) => {
+  // 접힌 카드는 눌러서 자세히 본다.
+  if ($('#inbox').classList.contains('compact')) { const c = ev.target.closest('.card'); if (c?.dataset.id) { ev.preventDefault(); return openTask(c.dataset.id); } }
   const b = ev.target.closest('button, a[data-open]'); if (!b) return;
   const card = b.closest('.card'), id = card?.dataset.id;
   if (b.dataset.open) { ev.preventDefault(); return openTask(b.dataset.open); }
