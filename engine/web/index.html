@@ -1000,6 +1000,28 @@ function threadHistory(entries) {
   }).join('')}</div>`;
 }
 
+// What the inbox card asks of the owner (approval request, open questions), shown in the detail view too.
+function dlgInboxContext(id) {
+  const ib = state?.inbox ?? {};
+  let h = '';
+  for (const a of (ib.approvals ?? []).filter((a) => a.id === id))
+    h += `<h4>결재 요청</h4><div class="prose">${md(tidy(a.what))}</div>${a.grants.length ? `<div class="meta">요청 권한 ${a.grants.map((g) => `<span class="grant">${esc(g)}</span>`).join('')}</div>` : ''}${a.hires.map((p) => `<div class="meta">채용안: ${esc(p.name)} (${esc(p.model ?? '-')}) — ${esc(p.description)}</div>`).join('')}`;
+  for (const q of (ib.questions ?? []).filter((q) => q.id === id && (q.answered === null || q.answered === undefined)))
+    h += `<h4>질문${q.item ? ` ${q.item}/${q.total}건` : ''}</h4><div class="prose">${md(tidy(q.question))}</div>`;
+  return h;
+}
+
+// Buttons the inbox card for this task offers, so the detail view can act without leaving it.
+function dlgInboxButtons(id) {
+  const ib = state?.inbox ?? {}, out = [];
+  if ((ib.approvals ?? []).some((a) => a.id === id)) out.push('<button class="btn good" data-dlgact="approve" title="아래 칸의 내용을 승인 메모로 남깁니다">승인</button>', '<button class="btn danger" data-dlgact="deny" title="아래 칸에 반려 사유를 적어 주세요">반려</button>');
+  if ((ib.mine ?? []).some((m) => m.id === id)) out.push('<button class="btn primary" data-dlgact="finish" title="아래 칸에 적은 내용(과 지금까지의 코멘트)을 완료 보고로 남깁니다">완료 보고</button>', '<button class="btn danger" data-dlgact="cancel" title="아래 칸에 적은 사유와 함께 이 일을 취소합니다">할 수 없음</button>');
+  for (const q of (ib.questions ?? []).filter((q) => q.id === id && (q.answered === null || q.answered === undefined)))
+    out.push(`<button class="btn primary" data-dlgact="answer" data-item="${q.item ?? ''}" title="아래 칸의 내용(과 지금까지의 코멘트)을 답변으로 넘기고 업무를 다시 시작합니다">답변 확정 · 업무 재개${q.item ? ` (${q.item}/${q.total}건)` : ''}</button>`);
+  if ((ib.finished ?? []).some((f) => f.id === id)) out.push('<button class="btn primary" data-dlgact="ack" title="처리할 일에서 내립니다">확인 완료</button>');
+  return out.join('');
+}
+
 // Back button inside the dialog: where we came from when following a link to another task.
 let dlgTrail = [];
 async function openTask(id, from) {
@@ -1037,10 +1059,12 @@ async function openTask(id, from) {
       const m = /^(\S+) \[([^\]]+)\] (.*)$/.exec(l);
       return m ? `<div><span class="id">${new Date(m[1]).toLocaleTimeString()}</span> <b style="color:var(--text)">${esc(m[2])}</b> ${esc(m[3])}</div>` : `<div>${esc(l)}</div>`;
     }).join('') : '<div class="empty">기록 없음</div>'}</div>
+    ${dlgInboxContext(id)}
     <h4>사용자 메모 · 조치</h4>
     ${d.owner.canReopen ? `<div class="meta">끝낸 내 업무입니다. 정정하거나 더 이야기할 게 있으면 <b>완료 해제</b>를 누르세요. 다시 처리할 일로 돌아가고, 아래에 적은 코멘트에는 ${esc(d.owner.responder)} 이(가) 답합니다.</div>` : ''}
     <textarea id="dlgNote" class="notebox" placeholder="${d.owner.inInbox || d.owner.canReopen ? `코멘트를 달면 ${esc(d.owner.responder)} 이(가) 바로 확인하고 답합니다` : d.owner.canComment ? `메모·지시를 남기면 코멘트 탭에 쌓이고, ${esc(d.owner.responder)} 이(가) 답한 뒤 작업에 반영합니다` : '이력에 남길 메모나 취소 사유'}"></textarea>
-    <div style="display:flex;gap:8px;margin-top:10px">
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      ${dlgInboxButtons(id)}
       ${d.owner.canReopen ? '<button class="btn primary" id="dlgReopen">완료 해제하고 코멘트 달기</button>' : `<button class="btn" id="dlgComment">${d.owner.inInbox || d.owner.canComment ? '코멘트 달기' : '메모 남기기'}</button>`}
       ${open ? '<button class="btn danger" id="dlgCancel">이 업무 취소</button>' : ''}
     </div>`;
@@ -1085,6 +1109,21 @@ async function openTask(id, from) {
     } catch (e) { toast(e.message, true); }
     await refresh(); openTask(id);
   };
+  // 처리할 일 카드의 버튼(확인 완료·승인·반려·완료 보고·할 수 없음·답변 확정)을 상세에서도 그대로 쓴다.
+  body.querySelectorAll('[data-dlgact]').forEach((b) => b.onclick = async () => {
+    const a = b.dataset.dlgact, v = $('#dlgNote').value.trim();
+    const hasCmt = d.thread.some((e) => !e.event);
+    if (a === 'deny' && !v) return toast('반려 사유를 아래 칸에 적어 주세요', true);
+    if (a === 'cancel' && !v) return toast('할 수 없는 이유를 아래 칸에 적어 주세요', true);
+    if ((a === 'finish' || a === 'answer') && !v && !hasCmt) return toast(a === 'finish' ? '한 일이나 결과를 아래 칸에 적어 주세요' : '답변을 아래 칸에 적어 주세요', true);
+    const req = {
+      ack: [{}, '확인 처리했습니다'], approve: [{ note: v }, '승인했습니다'], deny: [{ reason: v }, '반려했습니다'],
+      finish: [{ text: v }, '완료 보고했습니다'], cancel: [{ reason: v }, '취소했습니다'],
+      answer: [{ text: v, item: b.dataset.item ? Number(b.dataset.item) : undefined }, '답변을 보냈습니다'],
+    }[a];
+    await act(id, a, ...req);
+    if (a === 'ack') dlg.close(); else openTask(id);
+  });
   const cancel = $('#dlgCancel');
   if (cancel) cancel.onclick = () => { if (!confirm(`${id} 와 그 하위 업무를 모두 취소할까요?`)) return; act(id, 'cancel', { reason: $('#dlgNote').value.trim() }, '취소했습니다').then(() => dlg.close()); };
   if (!dlg.open) dlg.showModal();
